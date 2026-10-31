@@ -187,16 +187,18 @@ class MoveCommand(BaseCommand):
         b_color = cfg.bullet_color if cfg else ("#E69C24" if tank.camp == Camp.PLAYER else "#E63946")
 
         # 检测前路是否有砖块障碍待破障 (Auto-Breaching)
-        target_col = int(round(target_x / tile_size))
-        target_row = int(round(target_y / tile_size))
-        next_is_brick = (0 <= target_col < game_map.cols and 0 <= target_row < game_map.rows and
-                         game_map.get_tile(target_col, target_row) == TileType.BRICK)
+        # 若具备碾压砖块能力（清障车），则无视普通砖块直接碾压开赴，不需要停下开火破障
+        if not getattr(tank, "can_crush_bricks", False):
+            target_col = int(round(target_x / tile_size))
+            target_row = int(round(target_y / tile_size))
+            next_is_brick = (0 <= target_col < game_map.cols and 0 <= target_row < game_map.rows and
+                             game_map.get_tile(target_col, target_row) == TileType.BRICK)
 
-        if next_is_brick or self._check_front_has_brick(tank, primary, game_map):
-            tank.angle = move_angle
-            if tank.can_fire(physics_engine.limited_ammo_enabled):
-                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=move_angle)
-            return False
+            if next_is_brick or self._check_front_has_brick(tank, primary, game_map):
+                tank.angle = move_angle
+                if tank.can_fire(physics_engine.limited_ammo_enabled):
+                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=move_angle)
+                return False
 
         # 自由全向推进机动
         moved = physics_engine.move_tank(tank, (dx, dy))

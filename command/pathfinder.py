@@ -116,16 +116,22 @@ class GridPathfinder:
                         step_cost += 60.0
 
                 if tile == TileType.BRICK:
-                    step_ammo = 1
-                    if is_infinite_ammo:
-                        # 无限弹药：轻微开火时间开销，鼓励破障
-                        step_cost += self.BREACH_PENALTY_INFINITE
+                    if getattr(tank, "can_crush_bricks", False):
+                        # 具备碾压普通砖块能力（清障车）：只避让不能碾的方块，无视弹药限制直接碾碎通行
+                        factor = max(0.1, getattr(tank, "crush_speed_factor", 0.5))
+                        step_cost += (1.0 / factor - 1.0)
+                        step_ammo = 0
                     else:
-                        # 有限弹药：弹药不足则无法破障
-                        if ammo_spent + 1 > current_ammo:
-                            continue
-                        # 施加极高弹药惩罚，确保优先选择零耗弹绕行路线
-                        step_cost += self.AMMO_PENALTY_LIMITED
+                        step_ammo = 1
+                        if is_infinite_ammo:
+                            # 无限弹药：轻微开火时间开销，鼓励破障
+                            step_cost += self.BREACH_PENALTY_INFINITE
+                        else:
+                            # 有限弹药：弹药不足则无法破障
+                            if ammo_spent + 1 > current_ammo:
+                                continue
+                            # 施加极高弹药惩罚，确保优先选择零耗弹绕行路线
+                            step_cost += self.AMMO_PENALTY_LIMITED
 
                 new_g = g + step_cost
                 new_ammo = ammo_spent + step_ammo

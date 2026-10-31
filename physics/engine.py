@@ -165,10 +165,13 @@ class PhysicsEngine:
         row_start = max(0, int(new_y // tile_size))
         row_end = min(self.game_map.rows - 1, int((new_y + moving_tank.size - 0.01) // tile_size))
 
+        can_crush = getattr(moving_tank, "can_crush_bricks", False)
         for row in range(row_start, row_end + 1):
             for col in range(col_start, col_end + 1):
                 tile = self.game_map.get_tile(col, row)
-                if tile in (TileType.BRICK, TileType.STEEL, TileType.BASE):
+                # 若坦克具备碾压砖块能力，普通砖块不作为阻碍
+                blocks = (TileType.STEEL, TileType.BASE) if can_crush else (TileType.BRICK, TileType.STEEL, TileType.BASE)
+                if tile in blocks:
                     tile_rect = Rect(col * tile_size, row * tile_size, tile_size, tile_size)
                     if tank_rect.collides_with(tile_rect):
                         return False
@@ -208,10 +211,46 @@ class PhysicsEngine:
 
         return aligned_start_x, aligned_start_y
 
+    def _is_crushing_bricks(self, tank: Tank, x: float, y: float) -> bool:
+        """检查坦克在 (x, y) 处是否与普通砖块接触重叠"""
+        tile_size = self.game_map.tile_size
+        col_start = max(0, int(x // tile_size))
+        col_end = min(self.game_map.cols - 1, int((x + tank.size - 0.01) // tile_size))
+        row_start = max(0, int(y // tile_size))
+        row_end = min(self.game_map.rows - 1, int((y + tank.size - 0.01) // tile_size))
+        tank_rect = Rect(x, y, tank.size, tank.size)
+        for row in range(row_start, row_end + 1):
+            for col in range(col_start, col_end + 1):
+                if self.game_map.get_tile(col, row) == TileType.BRICK:
+                    tile_rect = Rect(col * tile_size, row * tile_size, tile_size, tile_size)
+                    if tank_rect.collides_with(tile_rect):
+                        return True
+        return False
+
+    def _crush_bricks_at(self, tank: Tank, x: float, y: float) -> bool:
+        """摧毁坦克当前位置覆盖到的所有普通砖块（碾压破坏）"""
+        if not getattr(tank, "can_crush_bricks", False):
+            return False
+        tile_size = self.game_map.tile_size
+        col_start = max(0, int(x // tile_size))
+        col_end = min(self.game_map.cols - 1, int((x + tank.size - 0.01) // tile_size))
+        row_start = max(0, int(y // tile_size))
+        row_end = min(self.game_map.rows - 1, int((y + tank.size - 0.01) // tile_size))
+        tank_rect = Rect(x, y, tank.size, tank.size)
+        crushed = False
+        for row in range(row_start, row_end + 1):
+            for col in range(col_start, col_end + 1):
+                if self.game_map.get_tile(col, row) == TileType.BRICK:
+                    tile_rect = Rect(col * tile_size, row * tile_size, tile_size, tile_size)
+                    if tank_rect.collides_with(tile_rect):
+                        self.game_map.destroy_tile(col, row)
+                        crushed = True
+        return crushed
+
     def move_tank(self, tank: Tank, direction: Any, speed: Optional[float] = None) -> bool:
         """
         移动坦克（支持四向枚举、任意浮点角度 0~360°、或 2D 向量元组 (dx, dy)）
-        支持自由旋转、平滑全向机动与贴墙滑动 (Wall Sliding)
+        支持自由旋转、平滑全向机动、碾压普通砖块速度衰减与贴墙滑动 (Wall Sliding)
         """
         if not tank.alive or tank.is_tower or tank.speed <= 0:
             return False
@@ -243,6 +282,13 @@ class PhysicsEngine:
             return False
 
         curr_x, curr_y = tank.x, tank.y
+
+        # 若坦克具备碾压砖块能力，且当前或即将接触砖块，移速衰减
+        if getattr(tank, "can_crush_bricks", False):
+            if self._is_crushing_bricks(tank, curr_x, curr_y) or self._is_crushing_bricks(tank, curr_x + dx_norm * step_speed, curr_y + dy_norm * step_speed):
+                factor = getattr(tank, "crush_speed_factor", 0.5)
+                step_speed = max(0.5, step_speed * factor)
+
         align_threshold = tile_size * 0.45
 
         # 连续通道中心线对齐微调：若行进方向接近正交轴向，自动吸附避免刮蹭砖块
@@ -275,6 +321,7 @@ class PhysicsEngine:
         if self.can_move_to(tank, new_x, new_y):
             tank.x = new_x
             tank.y = new_y
+            self._crush_bricks_at(tank, tank.x, tank.y)
             return True
 
         # 2. 贴墙滑动 (Wall Sliding)：斜向遇障碍时，分解为 X 与 Y 独立滑动
@@ -290,6 +337,7 @@ class PhysicsEngine:
             moved_y = True
 
         if moved_x or moved_y:
+            self._crush_bricks_at(tank, tank.x, tank.y)
             return True
 
         # 无法移动，恢复原始坐标

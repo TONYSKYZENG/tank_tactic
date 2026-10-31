@@ -55,6 +55,17 @@
       "visibility": 1.0
     },
     {
+      "id": "player_clearing",
+      "config_file": "tank_configs/clearing_tank.json",
+      "spawn": {
+        "x": 8,
+        "y": 14
+      },
+      "vision_size": 260,
+      "ammo": 30,
+      "visibility": 1.0
+    },
+    {
       "id": "player_bravo",
       "config_file": "tank_configs/player_tank.json",
       "spawn": {

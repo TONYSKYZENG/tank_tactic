@@ -1,0 +1,16 @@
+{
+  "name": "Clearing Tank",
+  "speed": 2.5,
+  "size": 36,
+  "color": "#D35400",
+  "track_color": "#5D6D7E",
+  "bullet_speed": 5.0,
+  "bullet_size": 12,
+  "bullet_color": "#F39C12",
+  "fire_cooldown": 20,
+  "health": 4,
+  "is_tower": false,
+  "can_attack": true,
+  "can_crush_bricks": true,
+  "crush_speed_factor": 0.55
+}

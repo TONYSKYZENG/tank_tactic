@@ -160,7 +160,9 @@ class Tank:
                  resupply_radius: float = 0.0, resupply_interval: int = 30,
                  unit_type: str = "tank", controllable: bool = True,
                  ai_script: Optional[str] = None,
-                 angle: Optional[float] = None):
+                 angle: Optional[float] = None,
+                 can_crush_bricks: bool = False,
+                 crush_speed_factor: float = 0.5):
         self.id = tank_id
         self.unit_type = unit_type
         self.x = x
@@ -190,6 +192,10 @@ class Tank:
         self.visibility = visibility
         self.is_spotted = False
         self.spotted_timer = 0
+
+        # ===== 清障车/碾压普通砖块能力 =====
+        self.can_crush_bricks = can_crush_bricks
+        self.crush_speed_factor = crush_speed_factor
 
         # ===== 防御塔专属属性 =====
         self.is_tower = is_tower

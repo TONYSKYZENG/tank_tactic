@@ -201,7 +201,9 @@ class GameCanvasWidget(QWidget):
                 resupply_interval=cfg.resupply_interval,
                 unit_type=cfg.name,
                 controllable=getattr(p_info, "controllable", True),
-                ai_script=getattr(p_info, "ai_script", None)
+                ai_script=getattr(p_info, "ai_script", None),
+                can_crush_bricks=getattr(cfg, "can_crush_bricks", False),
+                crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5)
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -236,7 +238,9 @@ class GameCanvasWidget(QWidget):
                 resupply_interval=cfg.resupply_interval,
                 unit_type=cfg.name,
                 controllable=getattr(enemy_info, "controllable", False),
-                ai_script=getattr(enemy_info, "ai_script", None)
+                ai_script=getattr(enemy_info, "ai_script", None),
+                can_crush_bricks=getattr(cfg, "can_crush_bricks", False),
+                crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5)
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg

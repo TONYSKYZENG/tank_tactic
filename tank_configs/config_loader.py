@@ -20,6 +20,9 @@ class TankConfig:
     tower_type: str = "general"       # 类型: "radar"(纯雷达视野), "cannon"(重型炮台), "supply"(弹药补给要塞)
     resupply_radius: float = 0.0      # 弹药补给有效半径 (像素)
     resupply_interval: int = 30       # 补充弹药的时间间隔 (帧数，30 帧约 0.5 秒)
+    # ===== 清障车/破障能力属性 =====
+    can_crush_bricks: bool = False     # 允许无视普通砖块直接碾压过去
+    crush_speed_factor: float = 0.5    # 碾压普通砖块时的速度衰减系数 (如 0.5 表示移速降低为 50%)
 
     @classmethod
     def from_json(cls, file_path: str or Path) -> "TankConfig":

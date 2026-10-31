@@ -117,8 +117,17 @@ class PixelRenderer:
 
             painter.setFont(QFont("Courier New", 8, QFont.Bold))
             painter.setPen(QPen(QColor("#F1C40F")))
-            tag_text = "▼MICRO [开路]" if auto_clear else "▼MICRO"
+            if auto_clear:
+                tag_text = "▼MICRO [开路]"
+            elif getattr(tank, "can_crush_bricks", False):
+                tag_text = "▼MICRO [清障]"
+            else:
+                tag_text = "▼MICRO"
             painter.drawText(QRectF(x - 25, y - 16, size + 50, 12), Qt.AlignCenter, tag_text)
+        elif getattr(tank, "can_crush_bricks", False):
+            painter.setFont(QFont("Courier New", 8, QFont.Bold))
+            painter.setPen(QPen(QColor("#E67E22")))
+            painter.drawText(QRectF(x - 10, y - 12, size + 20, 10), Qt.AlignCenter, "[清障]")
         elif auto_clear:
             painter.setFont(QFont("Courier New", 8, QFont.Bold))
             painter.setPen(QPen(QColor("#E67E22")))
@@ -133,6 +142,19 @@ class PixelRenderer:
 
         lx = -size / 2.0
         ly = -size / 2.0
+
+        # 若具备碾压普通砖块能力（清障车），在车头前方绘制重型防撞推土铲斗 (Dozer Blade)
+        if getattr(tank, "can_crush_bricks", False):
+            blade_w = size + 4.0
+            blade_h = 4.0
+            blade_x = -blade_w / 2.0
+            blade_y = ly - 3.0
+            painter.fillRect(QRectF(blade_x, blade_y, blade_w, blade_h), QColor("#E67E22"))
+            painter.setPen(border_pen)
+            painter.drawRect(QRectF(blade_x, blade_y, blade_w, blade_h))
+            painter.setPen(QPen(QColor("#F39C12"), 1))
+            painter.drawLine(int(blade_x + 2), int(blade_y + 1), int(blade_x + blade_w - 2), int(blade_y + 1))
+
         # 基准朝上品字形：(前置主炮, 后置左履带, 后置右履带)
         squares = [
             (lx + unit / 2.0, ly),

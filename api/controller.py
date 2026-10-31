@@ -717,6 +717,7 @@ class GameAPIController:
             "is_tower": target_tank.is_tower,
             "tower_type": target_tank.tower_type,
             "resupply_radius": target_tank.resupply_radius,
+            "can_crush_bricks": getattr(target_tank, "can_crush_bricks", False),
             "auto_clear": auto_clr,
             "controllable": getattr(target_tank, "controllable", True),
             "ai_script": getattr(target_tank, "ai_script", None)

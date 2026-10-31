@@ -2,12 +2,15 @@
 
 基于 **Python 3** 与 **PyQt5** 开发的经典老式小霸王（FC）像素风平面方块坦克大战。
 
-本项目采用高内聚、低耦合的模块化架构设计，将 **GUI 界面渲染**、**纯地图存档**、**任务编排**、**物理引擎**、**战车配置** 与 **敌军战术 AI** 严格隔离至独立文件夹，非常便于二次开发与战术算法扩展。
+本项目采用高内聚、低耦合的模块化架构设计，将 **GUI 界面渲染**、**WebUI / 远程 VNC 串流**、**纯地图存档**、**任务编排**、**物理引擎**、**战车配置** 与 **敌军战术 AI** 严格隔离至独立文件夹，既支持本地桌面 PyQt5 视窗游玩，也支持**纯后台无头运行并在浏览器中通过 Web VNC 终端远程游玩**。
 
 ---
 
 ## 🌟 核心特色
 
+- **双模运行架构（桌面 GUI / 浏览器 Web VNC）**：
+  - **原生桌面模式**：启动标准 PyQt5 窗口，60 FPS 原生渲染。
+  - **无头 Web VNC 模式**：无需本地桌面显示环境（Headless），引擎全后台运行，通过 WebSocket 二进制低延迟流式传输像素画面至浏览器 HTML5 Canvas，提供原生 VNC 般的远程控制体验！
 - **品字形方块像素风**：
   - **战车造型**：由 3 个像素正方形拼成经典“品”字形（前端突出 1 块为主炮塔，后端 2 块为底座履带），随行进方向自动旋转，前端带有黑色炮口与立体像素高光。
   - **炮弹造型**：采用微型“品”字形正方形组，随射击方向飞行。
@@ -29,19 +32,27 @@
 
 ```text
 tanks_tactic/
-├── tanks.py                      # 🚀 顶层游戏启动入口
+├── tanks.py                      # 🚀 顶层启动入口 (支持 --web 与 --gui)
 ├── README.md                     # 📖 项目工程说明文档
+├── .gitignore                    # 🙈 Git 忽略规则
+│
+├── webui/                        # 🌐 WebUI 与远程 VNC 模块
+│   ├── __init__.py
+│   ├── headless_runner.py        # 后台无头游戏循环与离屏帧渲染器
+│   ├── server.py                 # HTTP 静态服务器与 WebSocket VNC 二进制推流服务
+│   └── static/
+│       └── index.html            # 经典街机终端风格 Web VNC 客户端
 │
 ├── ai/                           # 🤖 敌军战术行为模块
 │   ├── __init__.py
 │   ├── tactics.py                # 战术行为实现 (Patrol, ChargeBase, Hunter)
 │   └── controller.py             # 敌军 AI 统一生命周期调度器
 │
-├── gui/                          # 🖥️ PyQt5 图形界面与像素渲染
+├── gui/                          # 🖥️ 本地 PyQt5 桌面图形界面
 │   ├── __init__.py
 │   ├── renderer.py               # 方块像素渲染 (品字形坦克、品字形炮弹、砖/铁瓦片)
 │   ├── game_widget.py            # 游戏主画布、键盘输入捕获与主循环刷新
-│   └── main_window.py            # 主窗口容器与复古 HUD 仪表盘 (生命值、残敌数、战局状态)
+│   └── main_window.py            # 主窗口容器与复古 HUD 仪表盘
 │
 ├── map_loader/                   # 🗺️ 地图数据加载模块
 │   ├── __init__.py
@@ -75,39 +86,55 @@ tanks_tactic/
 
 ---
 
-## 🎮 快速开始
+## 🎮 运行方式
 
-### 1. 环境依赖
+### 模式 A：浏览器 Web VNC 模式（无需本地桌面窗口，引擎后台运行）
 
-确保已安装 **Python 3.8+** 以及 **PyQt5**：
+在终端输入命令加上 `--web` 或 `-w` 参数：
 
 ```bash
-pip install PyQt5
+python3 tanks.py --web
 ```
 
-### 2. 运行游戏
+启动后在任意浏览器（电脑或手机）中访问：
+👉 **`http://localhost:8080`**
 
-在项目根目录下直接运行顶层入口：
+- **自定义端口**：
+  ```bash
+  python3 tanks.py --web --port 9000 --ws-port 9001
+  ```
+- **特性**：
+  - 无需弹出本地 GUI 桌面视窗，在云服务器、无桌面环境的 Linux/Mac 上均可流畅后台运行。
+  - Web 端提供实时的 FPS 与 Ping 延迟监视，支持键盘与移动端虚拟按键触控。
+
+---
+
+### 模式 B：本地原生 PyQt5 桌面视窗模式
+
+不加任何参数直接启动：
 
 ```bash
 python3 tanks.py
 ```
 
-### 3. 操作方式
+弹出本地桌面窗口，直接用原生按键畅玩。
+
+---
+
+## 🕹️ 操作方式
 
 | 按键 | 功能说明 |
 | :--- | :--- |
 | **`↑` / `↓` / `←` / `→`** | 控制玩家品字形坦克朝对应方向移动并对齐网格 |
 | **`W` / `S` / `A` / `D`** | 备用移动控制按键 |
 | **`空格键 (Space)`** | 发射品字形炮弹 |
+| **`R` 键** | 战局结束或通关后重新开始 |
 
 ---
 
 ## 🛠️ 配置格式详解
 
 ### 1. 战车配置 (`tank_configs/*.json`)
-
-控制坦克的运动与开火物理属性：
 
 ```json
 {
@@ -119,7 +146,7 @@ python3 tanks.py
   "bullet_speed": 6.0,       // 炮弹飞行速度
   "bullet_size": 12,         // 品字形炮弹尺寸
   "bullet_color": "#FFFFFF", // 炮弹颜色
-  "fire_cooldown": 15,       // 开火冷却帧数 (~60 FPS 下 15 帧约 0.25 秒)
+  "fire_cooldown": 15,       // 开火冷却帧数
   "health": 3                // 生命值
 }
 ```
@@ -142,8 +169,6 @@ python3 tanks.py
 ```
 
 ### 3. 任务定义 (`missions/*.json`)
-
-将地图、玩家与敌军战术绑定在一起：
 
 ```json
 {
@@ -175,22 +200,3 @@ python3 tanks.py
   ]
 }
 ```
-
----
-
-## 🧩 扩展指南
-
-### 如何新增自定义敌军战术行为？
-
-1. 在 `ai/tactics.py` 中继承 `BaseTactic`：
-   ```python
-   class FlankTactic(BaseTactic):
-       def decide(self, tank, physics_engine, game_map):
-           # 返回 (Direction, should_fire: bool)
-           return Direction.LEFT, True
-   ```
-2. 在 `ai/controller.py` 的 `TACTIC_REGISTRY` 中注册该策略名称：
-   ```python
-   TACTIC_REGISTRY["flank"] = FlankTactic
-   ```
-3. 在 `missions/*.json` 中的敌人 `tactic` 字段指定 `"flank"` 即可立即生效！

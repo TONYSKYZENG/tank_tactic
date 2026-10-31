@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Battle City - Web VNC Console</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background-color: #121214;
+      color: #E0E0E0;
+      font-family: 'Courier New', Courier, monospace, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* 顶部 VNC 状态栏 */
+    header {
+      width: 100%;
+      background-color: #1E1E24;
+      border-bottom: 2px solid #33333F;
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-badge {
+      background: #E69C24;
+      color: #000;
+      font-weight: bold;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      letter-spacing: 1px;
+    }
+
+    h1 {
+      font-size: 18px;
+      color: #FFF;
+      letter-spacing: 1px;
+    }
+
+    .vnc-status-bar {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-size: 13px;
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #282832;
+      padding: 4px 12px;
+      border-radius: 12px;
+      border: 1px solid #444455;
+    }
+
+    .indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background-color: #E74C3C;
+      box-shadow: 0 0 6px #E74C3C;
+    }
+
+    .indicator.connected {
+      background-color: #2ECC71;
+      box-shadow: 0 0 6px #2ECC71;
+    }
+
+    /* 主视口容器 */
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      width: 100%;
+      max-width: 1000px;
+    }
+
+    .screen-container {
+      position: relative;
+      background-color: #000;
+      border: 4px solid #3A3A48;
+      border-radius: 6px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 20px rgba(230, 156, 36, 0.15);
+      line-height: 0;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      cursor: crosshair;
+      outline: none;
+    }
+
+    /* 遮罩提示层 */
+    .overlay-msg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      color: #FFF;
+      font-size: 18px;
+    }
+
+    .btn {
+      background: #E69C24;
+      color: #000;
+      border: none;
+      padding: 10px 20px;
+      font-family: inherit;
+      font-weight: bold;
+      font-size: 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn:hover {
+      background: #F1C40F;
+    }
+
+    /* 底部 HUD 与操作指引 */
+    footer {
+      width: 100%;
+      max-width: 800px;
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .hud-panel {
+      background: #1B1B22;
+      border: 1px solid #333344;
+      border-radius: 6px;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 14px;
+    }
+
+    .hud-text {
+      color: #4AF626;
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+
+    .keys-guide {
+      font-size: 12px;
+      color: #888899;
+      text-align: center;
+      padding-bottom: 12px;
+    }
+
+    .key-tag {
+      display: inline-block;
+      background: #2C2C38;
+      color: #DDD;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid #444458;
+      font-size: 11px;
+      margin: 0 2px;
+    }
+
+    /* 移动端/屏幕虚拟触控板 (在较小屏幕上可见) */
+    .touch-controls {
+      display: none;
+      margin-top: 10px;
+      gap: 40px;
+      justify-content: center;
+    }
+
+    @media (max-width: 850px) {
+      .touch-controls {
+        display: flex;
+      }
+      canvas {
+        width: 100%;
+        height: auto;
+        max-width: 720px;
+      }
+    }
+
+    .dpad {
+      display: grid;
+      grid-template-columns: repeat(3, 44px);
+      grid-template-rows: repeat(3, 44px);
+      gap: 4px;
+    }
+
+    .dpad-btn {
+      background: #2A2A38;
+      border: 1px solid #444458;
+      color: #FFF;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+    }
+
+    .fire-touch-btn {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: #E74C3C;
+      color: #FFF;
+      font-weight: bold;
+      border: none;
+      align-self: center;
+      box-shadow: 0 4px 10px rgba(231,76,60,0.4);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="title-group">
+      <span class="logo-badge">VNC WEB</span>
+      <h1>小霸王坦克大战 · 远程终端</h1>
+    </div>
+    <div class="vnc-status-bar">
+      <div class="status-pill">
+        <span class="indicator" id="conn-indicator"></span>
+        <span id="conn-text">Connecting...</span>
+      </div>
+      <div class="status-pill">
+        <span id="stat-fps">FPS: --</span>
+      </div>
+      <div class="status-pill">
+        <span id="stat-ping">Ping: -- ms</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="screen-container">
+      <canvas id="vnc-canvas" width="720" height="576" tabindex="0"></canvas>
+      <div class="overlay-msg" id="connect-overlay" style="display: none;">
+        <p>⚠️ 远程 VNC 连接断开</p>
+        <button class="btn" onclick="initWebSocket()">重新连接</button>
+      </div>
+    </div>
+
+    <footer>
+      <div class="hud-panel">
+        <span class="hud-text" id="hud-status">生命: ♥ ♥ ♥ | 敌军残余: 3 | 鹰巢: 安全</span>
+        <button class="btn" style="padding: 4px 12px; font-size: 12px;" onclick="sendRestart()">重置关卡 (R)</button>
+      </div>
+
+      <div class="keys-guide">
+        控制: <span class="key-tag">↑</span><span class="key-tag">↓</span><span class="key-tag">←</span><span class="key-tag">→</span> 或 <span class="key-tag">W</span><span class="key-tag">A</span><span class="key-tag">S</span><span class="key-tag">D</span> 移动 | <span class="key-tag">空格键 Space</span> 发射品字形炮弹 | <span class="key-tag">R</span> 重新开始
+      </div>
+
+      <!-- 触控操作 -->
+      <div class="touch-controls">
+        <div class="dpad">
+          <div></div>
+          <button class="dpad-btn" onpointerdown="sendKey('ArrowUp', true)" onpointerup="sendKey('ArrowUp', false)">▲</button>
+          <div></div>
+          <button class="dpad-btn" onpointerdown="sendKey('ArrowLeft', true)" onpointerup="sendKey('ArrowLeft', false)">◀</button>
+          <div class="dpad-btn" style="background:transparent; border:none;"></div>
+          <button class="dpad-btn" onpointerdown="sendKey('ArrowRight', true)" onpointerup="sendKey('ArrowRight', false)">▶</button>
+          <div></div>
+          <button class="dpad-btn" onpointerdown="sendKey('ArrowDown', true)" onpointerup="sendKey('ArrowDown', false)">▼</button>
+          <div></div>
+        </div>
+        <button class="fire-touch-btn" onpointerdown="sendKey('Space', true)" onpointerup="sendKey('Space', false)">FIRE</button>
+      </div>
+    </footer>
+  </main>
+
+  <script>
+    const canvas = document.getElementById('vnc-canvas');
+    const ctx = canvas.getContext('2d');
+    const connIndicator = document.getElementById('conn-indicator');
+    const connText = document.getElementById('conn-text');
+    const overlay = document.getElementById('connect-overlay');
+    const statFps = document.getElementById('stat-fps');
+    const statPing = document.getElementById('stat-ping');
+    const hudStatus = document.getElementById('hud-status');
+
+    let ws = null;
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+    let lastPingTime = 0;
+
+    function getWsUrl() {
+      const loc = window.location;
+      const wsProto = (loc.protocol === 'https:') ? 'wss:' : 'ws:';
+      // 默认 WebSocket 端口为 8765
+      return `${wsProto}//${loc.hostname}:8765`;
+    }
+
+    function initWebSocket() {
+      const url = getWsUrl();
+      connText.innerText = "Connecting...";
+      connIndicator.classList.remove('connected');
+      overlay.style.display = 'none';
+
+      ws = new WebSocket(url);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        connText.innerText = "VNC Connected";
+        connIndicator.classList.add('connected');
+        overlay.style.display = 'none';
+        canvas.focus();
+        pingLoop();
+      };
+
+      ws.onclose = () => {
+        connText.innerText = "Disconnected";
+        connIndicator.classList.remove('connected');
+        overlay.style.display = 'flex';
+      };
+
+      ws.onerror = (err) => {
+        console.error("VNC WebSocket error:", err);
+      };
+
+      ws.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          // 渲染 JPEG 帧
+          renderFrame(event.data);
+          frameCount++;
+        } else {
+          // JSON 文本消息 (HUD 状态或 Pong)
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'status') {
+              updateHud(data);
+            } else if (data.type === 'pong') {
+              const rtt = Math.round(performance.now() - lastPingTime);
+              statPing.innerText = `Ping: ${rtt} ms`;
+            }
+          } catch(e) {}
+        }
+      };
+    }
+
+    function renderFrame(arrayBuffer) {
+      const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
+      createImageBitmap(blob).then(bitmap => {
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+      }).catch(err => {
+        // Fallback for older browsers
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+        };
+        img.src = url;
+      });
+    }
+
+    function updateHud(status) {
+      const hp = status.player_hp || 0;
+      const enemies = status.enemies_left !== undefined ? status.enemies_left : 0;
+      const baseAlive = status.base_alive;
+      let hpStr = "";
+      for (let i = 0; i < hp; i++) hpStr += "♥ ";
+      if (!hpStr) hpStr = "💀";
+
+      const baseStr = baseAlive ? "安全" : "失守!";
+      if (status.game_over) {
+        hudStatus.innerText = `GAME OVER - 鹰巢失守或战车被毁 | [按 R 重启]`;
+        hudStatus.style.color = "#E74C3C";
+      } else if (status.game_victory) {
+        hudStatus.innerText = `★ 胜利！敌军全部歼灭！ | [按 R 重启]`;
+        hudStatus.style.color = "#F1C40F";
+      } else {
+        hudStatus.innerText = `生命: ${hpStr} | 敌军残余: ${enemies} | 鹰巢: ${baseStr}`;
+        hudStatus.style.color = "#4AF626";
+      }
+    }
+
+    // 定时统计 FPS
+    setInterval(() => {
+      const now = performance.now();
+      const elapsed = (now - lastFpsTime) / 1000;
+      const fps = Math.round(frameCount / elapsed);
+      statFps.innerText = `FPS: ${fps}`;
+      frameCount = 0;
+      lastFpsTime = now;
+    }, 1000);
+
+    function pingLoop() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        lastPingTime = performance.now();
+        ws.send(JSON.stringify({ type: 'ping' }));
+        setTimeout(pingLoop, 2000);
+      }
+    }
+
+    function sendKey(keyName, isDown) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: isDown ? 'keydown' : 'keyup',
+          key: keyName
+        }));
+      }
+    }
+
+    function sendRestart() {
+      sendKey('r', true);
+      setTimeout(() => sendKey('r', false), 50);
+    }
+
+    // 键盘事件监听 (阻止方向键和空格键默认滚动)
+    const interceptKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Space', 'w', 'a', 's', 'd', 'r', 'W', 'A', 'S', 'D', 'R'];
+    window.addEventListener('keydown', (e) => {
+      if (interceptKeys.includes(e.key)) {
+        e.preventDefault();
+      }
+      sendKey(e.key, true);
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (interceptKeys.includes(e.key)) {
+        e.preventDefault();
+      }
+      sendKey(e.key, false);
+    });
+
+    // 页面加载启动
+    window.onload = () => {
+      initWebSocket();
+      canvas.focus();
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tanks-tactic"
+version = "1.0.0"
+description = "Battle City Tank Tactics - RTS & Micro Control Tank Game with AoE2 Scenario Editor"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Tanks Tactic Team" }
+]
+keywords = ["tank", "battle-city", "rts", "game", "editor", "pyqt5"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Games/Entertainment",
+]
+dependencies = [
+    "PyQt5>=5.15.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+tanks-game = "tanks:main"
+tanks-editor = "editor.main:main"
+
+[tool.setuptools]
+packages = [
+    "ai",
+    "ai_python",
+    "api",
+    "command",
+    "conditions",
+    "editor",
+    "grouping",
+    "gui",
+    "map_loader",
+    "mission_loader",
+    "monitor",
+    "physics",
+    "tank_configs",
+    "translations",
+    "webui",
+]
+py-modules = ["tanks", "editor"]

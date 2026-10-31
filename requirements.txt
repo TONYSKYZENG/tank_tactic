@@ -1,0 +1,5 @@
+# Tanks Tactic - Project Dependencies
+# Install with: pip install -r requirements.txt
+
+PyQt5>=5.15.0
+PyYAML>=6.0

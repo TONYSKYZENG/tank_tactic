@@ -3,22 +3,17 @@
   "map_file": "maps/level_01.json",
   "fog_of_war": true,
   "limited_ammo": true,
-  "player_initial_resources": {
-    "dark_matter": 0.0,
-    "alloy": 0.0
-  },
-  "enemy_initial_resources": {
-    "dark_matter": 0.0,
-    "alloy": 0.0
-  },
   "player": {
+    "id": "player_mcv",
     "config_file": "tank_configs/mcv_tank.json",
     "spawn": {
       "x": 8,
       "y": 14
     },
-    "vision_size": 288,
-    "ammo": 30
+    "vision_size": 288.0,
+    "ammo": 30,
+    "visibility": 1.0,
+    "controllable": true
   },
   "player_units": [
     {
@@ -28,7 +23,7 @@
         "x": 8,
         "y": 14
       },
-      "vision_size": 288,
+      "vision_size": 288.0,
       "ammo": 30,
       "visibility": 1.0,
       "controllable": true
@@ -40,10 +35,23 @@
         "x": 11,
         "y": 14
       },
-      "vision_size": 560,
+      "vision_size": 560.0,
       "ammo": 0,
       "visibility": 1.0,
       "controllable": false
+    },
+    {
+      "id": "player_3",
+      "config_file": "tank_configs/tower_cannon.json",
+      "spawn": {
+        "x": 11,
+        "y": 12
+      },
+      "vision_size": 280.0,
+      "ammo": 25,
+      "visibility": 1.0,
+      "controllable": true,
+      "ai_script": "ai_python/ally_escort.py"
     }
   ],
   "enemies": [
@@ -55,9 +63,10 @@
         "y": 1
       },
       "tactic": "defensive",
-      "vision_size": 288,
+      "vision_size": 288.0,
       "ammo": 30,
-      "visibility": 1.0
+      "visibility": 1.0,
+      "controllable": false
     },
     {
       "id": "enemy_radar",
@@ -67,12 +76,25 @@
         "y": 1
       },
       "tactic": "guard",
-      "vision_size": 560,
+      "vision_size": 560.0,
       "ammo": 0,
       "visibility": 1.0,
+      "controllable": false,
       "ai_script": "ai_python/commander_intermediate.py"
     }
   ],
+  "player_initial_resources": {
+    "dark_matter": 0.0,
+    "alloy": 0.0
+  },
+  "enemy_initial_resources": {
+    "dark_matter": 0.0,
+    "alloy": 0.0
+  },
+  "initial_resources": {
+    "dark_matter": 0.0,
+    "alloy": 0.0
+  },
   "victory_conditions": {
     "or": [
       {

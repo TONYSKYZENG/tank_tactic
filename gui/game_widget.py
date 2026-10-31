@@ -565,6 +565,8 @@ class GameCanvasWidget(QWidget):
 
         # 2. 地图
         PixelRenderer.draw_map(painter, self.game_map)
+        if hasattr(self, "resource_manager") and self.resource_manager:
+            PixelRenderer.draw_resource_blocks_overlay(painter, self.resource_manager.blocks, self.game_map.tile_size)
 
         # 3. 我方所有坦克
         for tank in self.physics_engine.player_tanks:

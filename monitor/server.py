@@ -115,6 +115,10 @@ def extract_game_state_snapshot(physics_engine, game_map, command_dispatcher, re
         "enemy_units": enemy_units,
         "bullets": bullets,
         "resources": resource_manager.get_both_stockpiles() if resource_manager else {},
+        "resource_rates": {
+            "player": resource_manager.get_harvest_rates("player"),
+            "enemy": resource_manager.get_harvest_rates("enemy")
+        } if resource_manager else {},
         "resource_blocks": [
             {
                 "col": b.col,
@@ -122,6 +126,7 @@ def extract_game_state_snapshot(physics_engine, game_map, command_dispatcher, re
                 "type": b.resource_type,
                 "amount": round(b.current_amount, 1),
                 "max": b.max_amount,
+                "regen_rate": getattr(b, "regen_rate", 0.0),
                 "harvest_radius": b.harvest_radius,
                 "exclusive_radius": b.exclusive_radius
             } for b in resource_manager.blocks

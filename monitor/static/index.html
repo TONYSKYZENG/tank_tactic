@@ -56,7 +56,7 @@
     .telemetry-meta {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 14px;
       font-size: 12px;
       color: #94A3B8;
     }
@@ -68,6 +68,22 @@
       border: 1px solid #333952;
     }
 
+    .btn-lang {
+      background: #2563EB;
+      color: #FFF;
+      border: 1px solid #60A5FA;
+      padding: 4px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: bold;
+      transition: background 0.2s;
+    }
+
+    .btn-lang:hover {
+      background: #1D4ED8;
+    }
+
     /* 主视窗两栏布局 */
     main {
       flex: 1;
@@ -75,12 +91,12 @@
       grid-template-columns: 740px 1fr;
       gap: 20px;
       padding: 16px 24px;
-      max-width: 1700px;
+      max-width: 1750px;
       width: 100%;
       margin: 0 auto;
     }
 
-    @media (max-width: 1280px) {
+    @media (max-width: 1380px) {
       main {
         grid-template-columns: 1fr;
       }
@@ -128,7 +144,7 @@
 
     .radar-legend {
       display: flex;
-      gap: 16px;
+      gap: 14px;
       font-size: 11px;
       color: #94A3B8;
       flex-wrap: wrap;
@@ -154,7 +170,7 @@
       padding: 16px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
       overflow: hidden;
     }
 
@@ -171,11 +187,18 @@
     .section-title {
       font-size: 13px;
       font-weight: bold;
-      padding: 4px 8px;
+      padding: 5px 10px;
       border-radius: 4px;
       margin-bottom: 8px;
       display: flex;
       justify-content: space-between;
+      align-items: center;
+    }
+
+    .section-resources {
+      background: rgba(168, 85, 247, 0.15);
+      color: #C084FC;
+      border-left: 3px solid #A855F7;
     }
 
     .section-player {
@@ -188,6 +211,53 @@
       background: rgba(231, 76, 60, 0.15);
       color: #F87171;
       border-left: 3px solid #E74C3C;
+    }
+
+    /* 资源经济监视卡片 */
+    .res-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .res-box {
+      background: #191D2E;
+      border: 1px solid #2D334C;
+      border-radius: 6px;
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .res-box-title {
+      font-size: 11px;
+      font-weight: bold;
+      color: #94A3B8;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .res-box-values {
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    .val-dm {
+      color: #C084FC;
+    }
+
+    .val-alloy {
+      color: #2DD4BF;
+    }
+
+    .val-rate {
+      font-size: 11px;
+      color: #FBBF24;
+      font-weight: normal;
     }
 
     table {
@@ -259,6 +329,11 @@
       color: #94A3B8;
     }
 
+    .tag-harvest {
+      background: #D97706;
+      color: #FEF3C7;
+    }
+
     /* 底部提示 */
     footer {
       background: #0E1017;
@@ -274,13 +349,14 @@
 
   <header>
     <div class="brand">
-      <span class="badge-ro">🔒 READ-ONLY MONITOR</span>
-      <h1>战术指挥中心 · 全知遥测系统 (上帝视角)</h1>
+      <span class="badge-ro" id="lbl-badge-ro">🔒 READ-ONLY MONITOR</span>
+      <h1 id="lbl-header-title">战术指挥中心 · 全知遥测系统 (上帝视角)</h1>
     </div>
     <div class="telemetry-meta">
-      <div class="pill">端口: <span id="meta-port">--</span></div>
-      <div class="pill">刷新率: <span id="meta-hz">10 Hz</span></div>
+      <div class="pill"><span id="lbl-port-tag">端口</span>: <span id="meta-port">--</span></div>
+      <div class="pill"><span id="lbl-hz-tag">刷新率</span>: <span id="meta-hz">10 Hz</span></div>
       <div class="pill" id="meta-status">战局: 初始化中...</div>
+      <button class="btn-lang" id="btn-lang" onclick="toggleLanguage()">🌐 English</button>
     </div>
   </header>
 
@@ -288,8 +364,8 @@
     <!-- 左侧：全息战术上帝小地图 -->
     <div class="radar-card">
       <div class="card-title">
-        <span>👁️ 全息战术上帝雷达 (透视一切隐蔽与迷雾)</span>
-        <span style="font-size: 11px; color: #64748B;">[只读监视 · 无法操控]</span>
+        <span id="lbl-radar-title">👁️ 全息战术上帝雷达 (透视一切隐蔽与迷雾)</span>
+        <span style="font-size: 11px; color: #64748B;" id="lbl-radar-subtitle">[只读监视 · 无法操控]</span>
       </div>
 
       <div class="radar-viewport">
@@ -297,38 +373,85 @@
       </div>
 
       <div class="radar-legend">
-        <div class="legend-item"><div class="dot" style="background:#2ECC71;"></div>我方机动战车</div>
-        <div class="legend-item"><div class="dot" style="background:#D4AF37;"></div>核心补给防御要塞</div>
-        <div class="legend-item"><div class="dot" style="background:#1ABC9C;"></div>雷达哨所</div>
-        <div class="legend-item"><div class="dot" style="background:#8E44AD;"></div>加农防御塔</div>
-        <div class="legend-item"><div class="dot" style="background:#E74C3C;"></div>敌军单位 (全知红点)</div>
-        <div class="legend-item"><div class="dot" style="background:#FFFFFF;"></div>飞行中炮弹</div>
+        <div class="legend-item"><div class="dot" style="background:#2ECC71;"></div><span id="leg-ally">我方机动战车</span></div>
+        <div class="legend-item"><div class="dot" style="background:#D4AF37;"></div><span id="leg-supply">核心要塞</span></div>
+        <div class="legend-item"><div class="dot" style="background:#1ABC9C;"></div><span id="leg-radar">雷达哨所</span></div>
+        <div class="legend-item"><div class="dot" style="background:#8E44AD;"></div><span id="leg-cannon">加农炮塔</span></div>
+        <div class="legend-item"><div class="dot" style="background:#E74C3C;"></div><span id="leg-enemy">敌军单位</span></div>
+        <div class="legend-item"><div class="dot" style="background:#C084FC;"></div><span id="leg-dm">暗物质矿点</span></div>
+        <div class="legend-item"><div class="dot" style="background:#2DD4BF;"></div><span id="leg-alloy">合金矿点</span></div>
+        <div class="legend-item"><div class="dot" style="background:#00E5FF; height: 3px;"></div><span id="leg-beam">采矿光束</span></div>
       </div>
     </div>
 
-    <!-- 右侧：全量敌我属性表格 -->
+    <!-- 右侧：全量敌我属性表格与资源遥测 -->
     <div class="inspector-card">
       <div class="card-title">
-        <span>📊 战场单位实时属性监视器 (Live Unit Telemetry)</span>
+        <span id="lbl-inspector-title">📊 战场单位实时属性监视器 (Live Unit Telemetry)</span>
       </div>
 
       <div class="tables-scroll">
+        <!-- 战略资源储备与矿区监视 -->
+        <div>
+          <div class="section-title section-resources">
+            <span id="lbl-sec-resources">💎 战役战略资源储备与矿区实时勘测</span>
+          </div>
+
+          <div class="res-grid">
+            <div class="res-box">
+              <div class="res-box-title">
+                <span id="lbl-player-stockpile">🛡️ 我方战略储备</span>
+                <span style="color:#4ADE80;">ALLIES</span>
+              </div>
+              <div class="res-box-values">
+                <span class="val-dm">🔮 <span id="tb-p-dm">0.0</span> <span class="val-rate" id="tb-p-dm-rate">(+0.0/s)</span></span>
+                <span class="val-alloy">⚙️ <span id="tb-p-alloy">0.0</span> <span class="val-rate" id="tb-p-alloy-rate">(+0.0/s)</span></span>
+              </div>
+            </div>
+
+            <div class="res-box">
+              <div class="res-box-title">
+                <span id="lbl-enemy-stockpile">⚠️ 敌军战略储备</span>
+                <span style="color:#F87171;">HOSTILE</span>
+              </div>
+              <div class="res-box-values">
+                <span class="val-dm">🔮 <span id="tb-e-dm">0.0</span> <span class="val-rate" id="tb-e-dm-rate">(+0.0/s)</span></span>
+                <span class="val-alloy">⚙️ <span id="tb-e-alloy">0.0</span> <span class="val-rate" id="tb-e-alloy-rate">(+0.0/s)</span></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 实体资源矿块监视表 -->
+          <table>
+            <thead>
+              <tr>
+                <th id="th-b-pos">坐标 (Col, Row)</th>
+                <th id="th-b-type">类型</th>
+                <th id="th-b-amt">实时储量 / 上限</th>
+                <th id="th-b-regen">自然再生</th>
+                <th id="th-b-status">当前开采动态</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-blocks"></tbody>
+          </table>
+        </div>
+
         <!-- 我方阵营表格 -->
         <div>
           <div class="section-title section-player">
-            <span>🛡️ 我方装甲集群与要塞设施 (<span id="cnt-player">0</span>)</span>
+            <span>🛡️ <span id="lbl-sec-player">我方装甲集群与要塞设施</span> (<span id="cnt-player">0</span>)</span>
           </div>
           <table>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>类型</th>
-                <th>坐标 (X,Y)</th>
-                <th>生命值</th>
-                <th>弹药数</th>
-                <th>视野</th>
-                <th>战术模式</th>
-                <th>开路</th>
+                <th id="th-p-id">ID</th>
+                <th id="th-p-type">类型</th>
+                <th id="th-p-pos">坐标 (X,Y)</th>
+                <th id="th-p-hp">生命值</th>
+                <th id="th-p-ammo">弹药数</th>
+                <th id="th-p-vision">视野</th>
+                <th id="th-p-tactic">战术模式</th>
+                <th id="th-p-clear">开路</th>
               </tr>
             </thead>
             <tbody id="tbody-player"></tbody>
@@ -338,20 +461,20 @@
         <!-- 敌军阵营表格 (全知透视) -->
         <div>
           <div class="section-title section-enemy">
-            <span>⚠️ 敌军装甲部队 · 全知透视 (<span id="cnt-enemy">0</span>)</span>
+            <span>⚠️ <span id="lbl-sec-enemy">敌军装甲部队 · 全知透视</span> (<span id="cnt-enemy">0</span>)</span>
           </div>
           <table>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>类型</th>
-                <th>坐标 (X,Y)</th>
-                <th>生命值</th>
-                <th>弹药数</th>
-                <th>视野</th>
-                <th>辨识度</th>
-                <th>我方侦测状态</th>
-                <th>战术</th>
+                <th id="th-e-id">ID</th>
+                <th id="th-e-type">类型</th>
+                <th id="th-e-pos">坐标 (X,Y)</th>
+                <th id="th-e-hp">生命值</th>
+                <th id="th-e-ammo">弹药数</th>
+                <th id="th-e-vision">视野</th>
+                <th id="th-e-vis">辨识度</th>
+                <th id="th-e-spotted">我方侦测状态</th>
+                <th id="th-e-tactic">战术</th>
               </tr>
             </thead>
             <tbody id="tbody-enemy"></tbody>
@@ -361,11 +484,175 @@
     </div>
   </main>
 
-  <footer>
+  <footer id="lbl-footer">
     🔒 本页面为辅助只读监控 WebUI (Omniscient Observer Dashboard) | 默认监听 0.0.0.0，实时从后台引擎读取全量战局与属性，无任何客户端控制输入接口。
   </footer>
 
   <script>
+    // ================= 双语字典 (Bilingual i18n) =================
+    const I18N = {
+      zh: {
+        badge_ro: "🔒 只读监视器",
+        header_title: "战术指挥中心 · 全知遥测系统 (上帝视角)",
+        port_tag: "端口",
+        hz_tag: "刷新率",
+        status_init: "战局: 初始化中...",
+        status_combat: "战局: 战斗进行中",
+        status_over: "战局: 作战失败 (Game Over)",
+        status_victory: "战局: 战役大捷 (Victory)",
+        radar_title: "👁️ 全息战术上帝雷达 (透视一切隐蔽与迷雾)",
+        radar_subtitle: "[只读监视 · 无法操控]",
+        inspector_title: "📊 战场单位实时属性监视器 (Live Unit Telemetry)",
+        sec_resources: "💎 战役战略资源储备与矿区实时勘测",
+        player_stockpile: "🛡️ 我方战略储备",
+        enemy_stockpile: "⚠️ 敌军战略储备",
+        sec_player: "我方装甲集群与要塞设施",
+        sec_enemy: "敌军装甲部队 · 全知透视",
+        leg_ally: "我方机动战车",
+        leg_supply: "核心要塞",
+        leg_radar: "雷达哨所",
+        leg_cannon: "加农炮塔",
+        leg_enemy: "敌军单位",
+        leg_dm: "暗物质矿点",
+        leg_alloy: "合金矿点",
+        leg_beam: "采矿光束",
+        th_pos: "坐标",
+        th_type: "类型",
+        th_amt: "实时储量 / 上限",
+        th_regen: "自然再生",
+        th_status: "当前开采动态",
+        th_id: "ID",
+        th_hp: "生命值",
+        th_ammo: "弹药数",
+        th_vision: "视野",
+        th_tactic: "战术模式",
+        th_clear: "开路",
+        th_vis: "辨识度",
+        th_spotted: "我方侦测状态",
+        status_spotted: "已侦测暴露",
+        status_hidden: "隐蔽迷雾中",
+        harvest_idle: "闲置未开采",
+        harvest_busy: "正在开采",
+        harvest_contested: "争夺交火中",
+        harvest_depleted: "已枯竭",
+        btn_lang: "🌐 English",
+        footer: "🔒 本页面为辅助只读监控 WebUI (Omniscient Observer Dashboard) | 默认监听 0.0.0.0，实时从后台引擎读取全量战局与属性，无任何客户端控制输入接口。"
+      },
+      en: {
+        badge_ro: "🔒 READ-ONLY MONITOR",
+        header_title: "Tactical Command · Omniscient Telemetry (God View)",
+        port_tag: "Port",
+        hz_tag: "Hz",
+        status_init: "Match: Initializing...",
+        status_combat: "Match: Combat Active",
+        status_over: "Match: Defeat (Game Over)",
+        status_victory: "Match: Victory",
+        radar_title: "👁️ Tactical Radar (Omniscient God View)",
+        radar_subtitle: "[Read-Only Monitor · No Control]",
+        inspector_title: "📊 Live Unit Telemetry & Resource Inspector",
+        sec_resources: "💎 Strategic Stockpiles & Resource Nodes",
+        player_stockpile: "🛡️ Allied Stockpile",
+        enemy_stockpile: "⚠️ Enemy Stockpile",
+        sec_player: "Allied Armor & Facilities",
+        sec_enemy: "Enemy Forces (Omniscient)",
+        leg_ally: "Allied Tanks",
+        leg_supply: "Core Fortress",
+        leg_radar: "Radar Station",
+        leg_cannon: "Cannon Tower",
+        leg_enemy: "Enemy Units",
+        leg_dm: "Dark Matter Node",
+        leg_alloy: "Alloy Node",
+        leg_beam: "Mining Beam",
+        th_pos: "Position",
+        th_type: "Type",
+        th_amt: "Amount / Max",
+        th_regen: "Regen Rate",
+        th_status: "Harvest Status",
+        th_id: "ID",
+        th_hp: "Health",
+        th_ammo: "Ammo",
+        th_vision: "Vision",
+        th_tactic: "Tactic",
+        th_clear: "Clear",
+        th_vis: "Visibility",
+        th_spotted: "Detection",
+        status_spotted: "Spotted",
+        status_hidden: "Hidden in Fog",
+        harvest_idle: "Idle",
+        harvest_busy: "Harvesting",
+        harvest_contested: "Contested",
+        harvest_depleted: "Depleted",
+        btn_lang: "🌐 中文",
+        footer: "🔒 Auxiliary Read-Only Telemetry WebUI | Listening on 0.0.0.0, real-time snapshot from engine without client controls."
+      }
+    };
+
+    let currentLang = localStorage.getItem('tanks_monitor_lang') || 'zh';
+
+    function toggleLanguage() {
+      currentLang = (currentLang === 'zh') ? 'en' : 'zh';
+      localStorage.setItem('tanks_monitor_lang', currentLang);
+      applyLanguage();
+    }
+
+    function applyLanguage() {
+      const dict = I18N[currentLang];
+      document.getElementById('lbl-badge-ro').innerText = dict.badge_ro;
+      document.getElementById('lbl-header-title').innerText = dict.header_title;
+      document.getElementById('lbl-port-tag').innerText = dict.port_tag;
+      document.getElementById('lbl-hz-tag').innerText = dict.hz_tag;
+      document.getElementById('btn-lang').innerText = dict.btn_lang;
+
+      document.getElementById('lbl-radar-title').innerText = dict.radar_title;
+      document.getElementById('lbl-radar-subtitle').innerText = dict.radar_subtitle;
+      document.getElementById('lbl-inspector-title').innerText = dict.inspector_title;
+      document.getElementById('lbl-sec-resources').innerText = dict.sec_resources;
+      document.getElementById('lbl-player-stockpile').innerText = dict.player_stockpile;
+      document.getElementById('lbl-enemy-stockpile').innerText = dict.enemy_stockpile;
+      document.getElementById('lbl-sec-player').innerText = dict.sec_player;
+      document.getElementById('lbl-sec-enemy').innerText = dict.sec_enemy;
+
+      document.getElementById('leg-ally').innerText = dict.leg_ally;
+      document.getElementById('leg-supply').innerText = dict.leg_supply;
+      document.getElementById('leg-radar').innerText = dict.leg_radar;
+      document.getElementById('leg-cannon').innerText = dict.leg_cannon;
+      document.getElementById('leg-enemy').innerText = dict.leg_enemy;
+      document.getElementById('leg-dm').innerText = dict.leg_dm;
+      document.getElementById('leg-alloy').innerText = dict.leg_alloy;
+      document.getElementById('leg-beam').innerText = dict.leg_beam;
+
+      document.getElementById('th-b-pos').innerText = dict.th_pos + " (Col, Row)";
+      document.getElementById('th-b-type').innerText = dict.th_type;
+      document.getElementById('th-b-amt').innerText = dict.th_amt;
+      document.getElementById('th-b-regen').innerText = dict.th_regen;
+      document.getElementById('th-b-status').innerText = dict.th_status;
+
+      document.getElementById('th-p-id').innerText = dict.th_id;
+      document.getElementById('th-p-type').innerText = dict.th_type;
+      document.getElementById('th-p-pos').innerText = dict.th_pos + " (X,Y)";
+      document.getElementById('th-p-hp').innerText = dict.th_hp;
+      document.getElementById('th-p-ammo').innerText = dict.th_ammo;
+      document.getElementById('th-p-vision').innerText = dict.th_vision;
+      document.getElementById('th-p-tactic').innerText = dict.th_tactic;
+      document.getElementById('th-p-clear').innerText = dict.th_clear;
+
+      document.getElementById('th-e-id').innerText = dict.th_id;
+      document.getElementById('th-e-type').innerText = dict.th_type;
+      document.getElementById('th-e-pos').innerText = dict.th_pos + " (X,Y)";
+      document.getElementById('th-e-hp').innerText = dict.th_hp;
+      document.getElementById('th-e-ammo').innerText = dict.th_ammo;
+      document.getElementById('th-e-vision').innerText = dict.th_vision;
+      document.getElementById('th-e-vis').innerText = dict.th_vis;
+      document.getElementById('th-e-spotted').innerText = dict.th_spotted;
+      document.getElementById('th-e-tactic').innerText = dict.th_tactic;
+
+      document.getElementById('lbl-footer').innerText = dict.footer;
+
+      if (lastData) {
+        renderTables(lastData);
+      }
+    }
+
     const canvas = document.getElementById('radar-canvas');
     const ctx = canvas.getContext('2d');
     const metaPort = document.getElementById('meta-port');
@@ -374,7 +661,19 @@
     const cntEnemy = document.getElementById('cnt-enemy');
     const tbodyPlayer = document.getElementById('tbody-player');
     const tbodyEnemy = document.getElementById('tbody-enemy');
+    const tbodyBlocks = document.getElementById('tbody-blocks');
 
+    const tbPDm = document.getElementById('tb-p-dm');
+    const tbPDmRate = document.getElementById('tb-p-dm-rate');
+    const tbPAlloy = document.getElementById('tb-p-alloy');
+    const tbPAlloyRate = document.getElementById('tb-p-alloy-rate');
+
+    const tbEDm = document.getElementById('tb-e-dm');
+    const tbEDmRate = document.getElementById('tb-e-dm-rate');
+    const tbEAlloy = document.getElementById('tb-e-alloy');
+    const tbEAlloyRate = document.getElementById('tb-e-alloy-rate');
+
+    let lastData = null;
     metaPort.innerText = window.location.port || '8088';
 
     async function fetchState() {
@@ -382,6 +681,7 @@
         const resp = await fetch('/api/state');
         if (!resp.ok) return;
         const data = await resp.json();
+        lastData = data;
         renderRadar(data);
         renderTables(data);
       } catch (err) {
@@ -389,7 +689,6 @@
       }
     }
 
-    // 每 100 毫秒轮询拉取一次全量上帝数据 (10 Hz)
     setInterval(fetchState, 100);
 
     function renderRadar(data) {
@@ -398,10 +697,15 @@
       const map = data.map;
       const tile_size = map.tile_size || 36;
 
+      if (map.width && map.height && (canvas.width !== map.width || canvas.height !== map.height)) {
+        canvas.width = map.width;
+        canvas.height = map.height;
+      }
+
       ctx.fillStyle = '#08090E';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // 1. 绘制网格瓦片
+      // 1. 绘制网格瓦片 (包括砖块、铁块、暗物质矿、合金矿、鹰巢基地)
       if (map.grid) {
         for (let r = 0; r < map.rows; r++) {
           for (let c = 0; c < map.cols; c++) {
@@ -420,18 +724,102 @@
               ctx.fillRect(x, y, tile_size, tile_size);
               ctx.strokeStyle = '#475569';
               ctx.strokeRect(x, y, tile_size, tile_size);
+            } else if (tile === 3) {
+              // 暗物质神秘矿块 (水晶紫色)
+              ctx.fillStyle = '#2A0845';
+              ctx.fillRect(x, y, tile_size, tile_size);
+              ctx.fillStyle = '#8E44AD';
+              ctx.fillRect(x + tile_size * 0.22, y + tile_size * 0.22, tile_size * 0.56, tile_size * 0.56);
+              ctx.strokeStyle = '#C084FC';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(x, y, tile_size, tile_size);
+            } else if (tile === 4) {
+              // 合金工业矿块 (高科青蓝)
+              ctx.fillStyle = '#0F2942';
+              ctx.fillRect(x, y, tile_size, tile_size);
+              ctx.fillStyle = '#14B8A6';
+              ctx.fillRect(x + tile_size * 0.2, y + tile_size * 0.2, tile_size * 0.6, tile_size * 0.6);
+              ctx.strokeStyle = '#2DD4BF';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(x, y, tile_size, tile_size);
+            } else if (tile === 5 || tile === 9) {
+              // 核心基地要塞
+              ctx.fillStyle = '#111111';
+              ctx.fillRect(x, y, tile_size, tile_size);
+              ctx.fillStyle = '#D4AF37';
+              ctx.fillRect(x + tile_size * 0.2, y + tile_size * 0.2, tile_size * 0.6, tile_size * 0.6);
+              ctx.strokeStyle = '#EF4444';
+              ctx.strokeRect(x, y, tile_size, tile_size);
             }
           }
         }
       }
 
-      // 2. 绘制我方单位及补给圈
+      // 2. 绘制实体资源矿块标识与采集光圈
+      if (data.resource_blocks) {
+        data.resource_blocks.forEach(b => {
+          const cx = (b.col + 0.5) * tile_size;
+          const cy = (b.row + 0.5) * tile_size;
+          const isDm = (b.type === 'dark_matter');
+          const borderCol = isDm ? '#A855F7' : '#14B8A6';
+
+          // 采集范围圈 (淡色虚线)
+          if (b.harvest_radius > 0) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, b.harvest_radius, 0, Math.PI * 2);
+            ctx.strokeStyle = isDm ? 'rgba(168, 85, 247, 0.25)' : 'rgba(20, 184, 166, 0.25)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+
+          // 底部存量药丸
+          const pillW = tile_size - 4;
+          const pillH = 11;
+          const px = b.col * tile_size + 2;
+          const py = b.row * tile_size + tile_size - pillH - 2;
+
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+          ctx.fillRect(px, py, pillW, pillH);
+          ctx.strokeStyle = borderCol;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(px, py, pillW, pillH);
+
+          ctx.fillStyle = b.amount > 0 ? (isDm ? '#E9D5FF' : '#CCFBF1') : '#94A3B8';
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'center';
+          const txt = b.amount > 0 ? `${Math.round(b.amount)}` : 'DEP';
+          ctx.fillText(txt, cx, py + 8.5);
+        });
+      }
+
+      // 3. 绘制单位采矿牵引光束
+      const allUnits = (data.player_units || []).concat(data.enemy_units || []);
+      allUnits.forEach(u => {
+        if (u.is_harvesting && u.harvest_target) {
+          const tx = (u.harvest_target[0] + 0.5) * tile_size;
+          const ty = (u.harvest_target[1] + 0.5) * tile_size;
+          const ux = u.x + u.size / 2;
+          const uy = u.y + u.size / 2;
+
+          ctx.beginPath();
+          ctx.moveTo(ux, uy);
+          ctx.lineTo(tx, ty);
+          ctx.strokeStyle = u.camp === 'player' ? 'rgba(0, 229, 255, 0.8)' : 'rgba(245, 158, 11, 0.8)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      });
+
+      // 4. 绘制我方单位及补给圈
       if (data.player_units) {
         data.player_units.forEach(u => {
           const cx = u.x + u.size / 2;
           const cy = u.y + u.size / 2;
 
-          // 补给光环
           if (u.resupply_radius > 0) {
             ctx.beginPath();
             ctx.arc(cx, cy, u.resupply_radius, 0, Math.PI * 2);
@@ -442,21 +830,18 @@
             ctx.setLineDash([]);
           }
 
-          // 视线范围 (半透明白框)
           if (u.vision_size > 0) {
             const half = u.vision_size / 2;
             ctx.strokeStyle = 'rgba(56, 189, 248, 0.15)';
             ctx.strokeRect(cx - half, cy - half, u.vision_size, u.vision_size);
           }
 
-          // 单位主体
           ctx.fillStyle = u.color || '#2ECC71';
           ctx.fillRect(u.x, u.y, u.size, u.size);
           ctx.strokeStyle = '#000';
           ctx.lineWidth = 1;
           ctx.strokeRect(u.x, u.y, u.size, u.size);
 
-          // 名字标签
           ctx.fillStyle = '#4ADE80';
           ctx.font = '9px monospace';
           ctx.textAlign = 'center';
@@ -464,13 +849,12 @@
         });
       }
 
-      // 3. 绘制敌方单位 (全知透视，即使在迷雾中也能看到！)
+      // 5. 绘制敌方单位 (全知透视，即使在迷雾中也能看到！)
       if (data.enemy_units) {
         data.enemy_units.forEach(u => {
           const cx = u.x + u.size / 2;
           const cy = u.y + u.size / 2;
 
-          // 若在迷雾中未被我方侦测到，带有雷达扫描虚线红圈
           if (!u.is_spotted) {
             ctx.beginPath();
             ctx.arc(cx, cy, u.size, 0, Math.PI * 2);
@@ -494,7 +878,7 @@
         });
       }
 
-      // 4. 绘制飞行炮弹
+      // 6. 绘制飞行炮弹
       if (data.bullets) {
         data.bullets.forEach(b => {
           ctx.fillStyle = b.camp === 'player' ? '#FEF08A' : '#FCA5A5';
@@ -505,36 +889,97 @@
 
     function renderTables(data) {
       if (!data) return;
+      const dict = I18N[currentLang];
 
       const pUnits = data.player_units || [];
       const eUnits = data.enemy_units || [];
+      const blocks = data.resource_blocks || [];
 
       cntPlayer.innerText = pUnits.length;
       cntEnemy.innerText = eUnits.length;
 
       if (data.status) {
         if (data.status.game_over) {
-          metaStatus.innerText = '战局: GAME OVER (失败)';
+          metaStatus.innerText = dict.status_over;
           metaStatus.style.color = '#EF4444';
         } else if (data.status.game_victory) {
-          metaStatus.innerText = '战局: VICTORY (大捷)';
+          metaStatus.innerText = dict.status_victory;
           metaStatus.style.color = '#EAB308';
         } else {
-          metaStatus.innerText = '战局: 战斗进行中';
+          metaStatus.innerText = dict.status_combat;
           metaStatus.style.color = '#22C55E';
         }
       }
 
-      // 渲染我方表格
+      // 1. 渲染战略资源总库
+      const res = data.resources || {};
+      const rates = data.resource_rates || {};
+
+      const pRes = res.player || {};
+      const eRes = res.enemy || {};
+      const pRates = rates.player || {};
+      const eRates = rates.enemy || {};
+
+      const pDm = parseFloat(pRes.dark_matter || 0.0);
+      const pAlloy = parseFloat(pRes.alloy || 0.0);
+      const pDmR = parseFloat(pRates.dark_matter || 0.0);
+      const pAlloyR = parseFloat(pRates.alloy || 0.0);
+
+      tbPDm.innerText = pDm.toFixed(1);
+      tbPDmRate.innerText = `(${pDmR >= 0 ? '+' : ''}${pDmR.toFixed(1)}/s)`;
+      tbPAlloy.innerText = pAlloy.toFixed(1);
+      tbPAlloyRate.innerText = `(${pAlloyR >= 0 ? '+' : ''}${pAlloyR.toFixed(1)}/s)`;
+
+      const eDm = parseFloat(eRes.dark_matter || 0.0);
+      const eAlloy = parseFloat(eRes.alloy || 0.0);
+      const eDmR = parseFloat(eRates.dark_matter || 0.0);
+      const eAlloyR = parseFloat(eRates.alloy || 0.0);
+
+      tbEDm.innerText = eDm.toFixed(1);
+      tbEDmRate.innerText = `(${eDmR >= 0 ? '+' : ''}${eDmR.toFixed(1)}/s)`;
+      tbEAlloy.innerText = eAlloy.toFixed(1);
+      tbEAlloyRate.innerText = `(${eAlloyR >= 0 ? '+' : ''}${eAlloyR.toFixed(1)}/s)`;
+
+      // 2. 渲染资源矿块列表
+      const allTanks = pUnits.concat(eUnits);
+      tbodyBlocks.innerHTML = blocks.map(b => {
+        const isDm = (b.type === 'dark_matter');
+        const typeBadge = isDm
+          ? `<span class="tag" style="background:#4A235A; color:#E8DAEF;">🔮 暗物质</span>`
+          : `<span class="tag" style="background:#0E6251; color:#D1F2EB;">⚙️ 合金</span>`;
+
+        // 查找当前是否正有单位采集该矿块
+        const harvesters = allTanks.filter(t => t.is_harvesting && t.harvest_target && t.harvest_target[0] === b.col && t.harvest_target[1] === b.row);
+        let statusStr = `<span style="color:#64748B;">${dict.harvest_idle}</span>`;
+        if (b.amount <= 0) {
+          statusStr = `<span style="color:#EF4444;">${dict.harvest_depleted}</span>`;
+        } else if (harvesters.length > 0) {
+          const names = harvesters.map(h => `<b style="color:${h.camp === 'player' ? '#4ADE80' : '#F87171'}">${h.id}</b>`).join(', ');
+          statusStr = `<span class="tag tag-harvest">${dict.harvest_busy} (${names})</span>`;
+        }
+
+        return `
+          <tr>
+            <td><b>(${b.col}, ${b.row})</b></td>
+            <td>${typeBadge}</td>
+            <td><b style="color:${isDm ? '#C084FC' : '#2DD4BF'};">${b.amount}</b> / ${b.max}</td>
+            <td>+${b.regen_rate || 0}/s</td>
+            <td>${statusStr}</td>
+          </tr>
+        `;
+      }).join('');
+
+      // 3. 渲染我方表格
       tbodyPlayer.innerHTML = pUnits.map(u => {
         const hpPct = Math.max(0, Math.min(100, (u.health / u.max_health) * 100));
         const typeTag = u.is_tower ? `<span class="tag tag-tower">${u.tower_type}</span>` : `<span class="tag tag-tank">战车</span>`;
         const ammoStr = u.ammo === -1 ? '无限' : `${u.ammo}/${u.max_ammo}`;
         const autoClearStr = u.auto_clear ? '<span style="color:#F97316;">ON</span>' : '<span style="color:#64748B;">OFF</span>';
+        const harvestTag = u.is_harvesting ? ` <span class="tag tag-harvest">[⛏采集]</span>` : '';
 
         return `
           <tr>
-            <td><b>${u.id}</b></td>
+            <td><b>${u.id}</b>${harvestTag}</td>
             <td>${typeTag}</td>
             <td>(${Math.round(u.x)}, ${Math.round(u.y)})</td>
             <td>
@@ -549,17 +994,18 @@
         `;
       }).join('');
 
-      // 渲染敌方表格
+      // 4. 渲染敌方表格
       tbodyEnemy.innerHTML = eUnits.map(u => {
         const hpPct = Math.max(0, Math.min(100, (u.health / u.max_health) * 100));
         const ammoStr = u.ammo === -1 ? '无限' : `${u.ammo}/${u.max_ammo}`;
         const spottedTag = u.is_spotted
-          ? `<span class="tag tag-spotted">已侦测暴露</span>`
-          : `<span class="tag tag-hidden">隐蔽迷雾中</span>`;
+          ? `<span class="tag tag-spotted">${dict.status_spotted}</span>`
+          : `<span class="tag tag-hidden">${dict.status_hidden}</span>`;
+        const harvestTag = u.is_harvesting ? ` <span class="tag tag-harvest">[⛏采集]</span>` : '';
 
         return `
           <tr>
-            <td><b style="color:#FCA5A5;">${u.id}</b></td>
+            <td><b style="color:#FCA5A5;">${u.id}</b>${harvestTag}</td>
             <td><span class="tag tag-tank">${u.name || '敌军'}</span></td>
             <td>(${Math.round(u.x)}, ${Math.round(u.y)})</td>
             <td>
@@ -575,6 +1021,11 @@
         `;
       }).join('');
     }
+
+    window.onload = () => {
+      applyLanguage();
+      fetchState();
+    };
   </script>
 </body>
 </html>

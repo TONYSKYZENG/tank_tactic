@@ -433,6 +433,21 @@ class HeadlessGameRunner(QObject):
             "limited_ammo_enabled": self.physics_engine.limited_ammo_enabled,
             "resources": self.resource_manager.get_all_resources(camp="player"),
             "resource_rates": self.resource_manager.get_harvest_rates(camp="player"),
+            "enemy_resources": self.resource_manager.get_all_resources(camp="enemy"),
+            "enemy_resource_rates": self.resource_manager.get_harvest_rates(camp="enemy"),
+            "resource_blocks": [
+                {
+                    "col": b.col,
+                    "row": b.row,
+                    "type": b.resource_type,
+                    "amount": round(b.current_amount, 1),
+                    "max": b.max_amount,
+                    "regen_rate": b.regen_rate
+                } for b in getattr(self.resource_manager, "blocks", [])
+            ],
+            "map_width": self.game_map.pixel_width,
+            "map_height": self.game_map.pixel_height,
+            "tile_size": self.game_map.tile_size,
             "game_over": self.game_over,
             "game_victory": self.game_victory,
             "victory_desc": self.victory_condition.get_description(),
@@ -446,17 +461,20 @@ class HeadlessGameRunner(QObject):
 
         painter.fillRect(self.render_image.rect(), QColor("#000000"))
         PixelRenderer.draw_map(painter, self.game_map)
+        if hasattr(self, "resource_manager") and self.resource_manager:
+            PixelRenderer.draw_resource_blocks_overlay(painter, self.resource_manager.blocks, self.game_map.tile_size)
 
         for tank in self.physics_engine.player_tanks:
             if tank.alive:
                 is_sel = self.selection_mgr.is_selected(tank)
                 is_micro = self.selection_mgr.is_micro_tank(tank)
                 auto_clr = self.command_dispatcher.is_auto_clear_path(tank)
-                PixelRenderer.draw_tank(painter, tank, is_selected=is_sel, is_micro=is_micro, auto_clear=auto_clr)
+                PixelRenderer.draw_tank(painter, tank, is_selected=is_sel, is_micro=is_micro,
+                                        auto_clear=auto_clr, tile_size=self.game_map.tile_size)
 
         for enemy in self.physics_engine.enemy_tanks:
             if enemy.alive and self.physics_engine.is_enemy_visible(enemy):
-                PixelRenderer.draw_tank(painter, enemy)
+                PixelRenderer.draw_tank(painter, enemy, tile_size=self.game_map.tile_size)
 
         sight_rects = self.physics_engine.get_player_sight_rects()
         has_full_vision = any(t.vision_size < 0 for t in self.physics_engine.player_tanks if t.alive)

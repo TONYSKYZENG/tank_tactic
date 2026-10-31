@@ -121,6 +121,42 @@ class PixelRenderer:
         painter.drawPoint(int(x + size - 6), int(y + size - 6))
 
     @staticmethod
+    def draw_resource_blocks_overlay(painter: QPainter, blocks: list, tile_size: float = 36.0) -> None:
+        """在地图资源矿块上层绘制存量标识、发光晶核与可采集/排他指示"""
+        if not blocks:
+            return
+        painter.save()
+        for b in blocks:
+            col = getattr(b, "col", 0)
+            row = getattr(b, "row", 0)
+            res_type = getattr(b, "resource_type", "")
+            amt = getattr(b, "current_amount", 0.0)
+            x = col * tile_size
+            y = row * tile_size
+
+            is_dm = ("dark_matter" in res_type)
+            badge_color = QColor(142, 68, 173) if is_dm else QColor(26, 188, 156)
+            text_color = QColor("#E8DAEF") if is_dm else QColor("#D1F2EB")
+
+            # 绘制底部存量药丸指示器
+            pill_h = 10.0
+            pill_w = tile_size - 4.0
+            pill_x = x + 2.0
+            pill_y = y + tile_size - pill_h - 1.0
+
+            painter.fillRect(QRectF(pill_x, pill_y, pill_w, pill_h), QColor(0, 0, 0, 190))
+            painter.setPen(QPen(badge_color, 1))
+            painter.drawRect(QRectF(pill_x, pill_y, pill_w, pill_h))
+
+            painter.setFont(QFont("Courier New", 7, QFont.Bold))
+            painter.setPen(QPen(text_color))
+            if amt <= 0.0:
+                painter.drawText(QRectF(pill_x, pill_y - 1, pill_w, pill_h + 2), Qt.AlignCenter, "DEP")
+            else:
+                painter.drawText(QRectF(pill_x, pill_y - 1, pill_w, pill_h + 2), Qt.AlignCenter, f"{int(amt)}")
+        painter.restore()
+
+    @staticmethod
     def draw_tank(painter: QPainter, tank: Tank, is_selected: bool = False,
                   is_micro: bool = False, auto_clear: bool = False,
                   tile_size: float = 36.0) -> None:

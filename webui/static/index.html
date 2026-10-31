@@ -59,7 +59,7 @@
     .vnc-status-bar {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 14px;
       font-size: 13px;
     }
 
@@ -86,15 +86,76 @@
       box-shadow: 0 0 6px #2ECC71;
     }
 
+    .btn-lang {
+      background: #3B82F6;
+      color: #FFF;
+      border: 1px solid #60A5FA;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: bold;
+      transition: background 0.2s;
+    }
+
+    .btn-lang:hover {
+      background: #2563EB;
+    }
+
     main {
       flex: 1;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 16px;
+      padding: 14px 16px;
       width: 100%;
-      max-width: 1000px;
+      max-width: 1100px;
+      gap: 10px;
+    }
+
+    /* 资源经济状态 HUD 顶栏 */
+    .resource-panel {
+      width: 100%;
+      max-width: 820px;
+      background: #151724;
+      border: 1px solid #2F3652;
+      border-radius: 6px;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      gap: 12px;
+      font-size: 13px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+
+    .res-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .res-badge-dm {
+      color: #C084FC;
+      font-weight: bold;
+    }
+
+    .res-badge-alloy {
+      color: #2DD4BF;
+      font-weight: bold;
+    }
+
+    .res-rate {
+      color: #FBBF24;
+      font-size: 11px;
+    }
+
+    .res-enemy-info {
+      color: #F87171;
+      font-size: 11px;
+      padding-left: 8px;
+      border-left: 1px solid #333952;
     }
 
     .screen-container {
@@ -162,7 +223,6 @@
     footer {
       width: 100%;
       max-width: 820px;
-      margin-top: 12px;
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -220,8 +280,8 @@
 
   <header>
     <div class="title-group">
-      <span class="logo-badge">RTS COMMAND</span>
-      <h1>小霸王坦克大战 · 装甲集群微操终端</h1>
+      <span class="logo-badge" id="lbl-logo">RTS COMMAND</span>
+      <h1 id="lbl-title">小霸王坦克大战 · 装甲集群微操终端</h1>
     </div>
     <div class="vnc-status-bar">
       <div class="status-pill">
@@ -234,43 +294,183 @@
       <div class="status-pill">
         <span id="stat-ping">Ping: -- ms</span>
       </div>
+      <button class="btn-lang" id="btn-lang" onclick="toggleLanguage()">🌐 English</button>
     </div>
   </header>
 
   <main>
+    <!-- 实时战略资源与经济面板 (暗物质、合金与矿点) -->
+    <div class="resource-panel">
+      <div class="res-item">
+        <span>🔮</span>
+        <span id="lbl-dm-tag">暗物质:</span>
+        <span class="res-badge-dm" id="hud-res-dm">0.0</span>
+        <span class="res-rate" id="hud-rate-dm">(+0.0/s)</span>
+      </div>
+      <div class="res-item">
+        <span>⚙️</span>
+        <span id="lbl-alloy-tag">合金:</span>
+        <span class="res-badge-alloy" id="hud-res-alloy">0.0</span>
+        <span class="res-rate" id="hud-rate-alloy">(+0.0/s)</span>
+      </div>
+      <div class="res-item">
+        <span>🗺️</span>
+        <span id="lbl-blocks-tag">资源矿点:</span>
+        <span style="color:#60A5FA; font-weight:bold;" id="hud-res-blocks">--</span>
+      </div>
+      <div class="res-enemy-info" id="hud-res-enemy">
+        敌方资源: 🔮 0.0 | ⚙️ 0.0
+      </div>
+    </div>
+
     <div class="screen-container">
       <canvas id="vnc-canvas" width="720" height="576" tabindex="0"></canvas>
       <div class="overlay-msg" id="connect-overlay" style="display: none;">
-        <p>⚠️ 远程 VNC 连接断开</p>
-        <button class="btn" onclick="initWebSocket()">重新连接</button>
+        <p id="lbl-disconnected-msg">⚠️ 远程 VNC 连接断开</p>
+        <button class="btn" id="btn-reconnect" onclick="initWebSocket()">重新连接</button>
       </div>
     </div>
 
     <footer>
       <div class="hud-panel">
-        <span class="hud-text" id="hud-status">我方存活: 3 | 选中: 1 | 敌军残余: 3</span>
-        <span class="micro-text" id="hud-micro">[微操坦克: player_alpha]</span>
+        <span class="hud-text" id="hud-status">我方存活: -- | 选中: -- | 敌军残余: --</span>
+        <span class="micro-text" id="hud-micro">[微操坦克: --]</span>
       </div>
 
       <!-- 快速战术指令工具栏 -->
       <div class="action-toolbar">
-        <button class="btn" onclick="sendKey('tab', true); setTimeout(()=>sendKey('tab', false), 50)">[Tab] 切换微操坦克</button>
-        <button class="btn btn-secondary" onclick="sendKey('b', true); setTimeout(()=>sendKey('b', false), 50)">[B] 自动开路</button>
-        <button class="btn btn-secondary" onclick="sendKey('1', true); setTimeout(()=>sendKey('1', false), 50)">[1] 自由交战</button>
-        <button class="btn btn-secondary" onclick="sendKey('2', true); setTimeout(()=>sendKey('2', false), 50)">[2] 坚守阵地</button>
-        <button class="btn btn-secondary" onclick="sendKey('3', true); setTimeout(()=>sendKey('3', false), 50)">[3] 护卫单位</button>
-        <button class="btn btn-secondary" onclick="sendKey('s', true); setTimeout(()=>sendKey('s', false), 50)">[S] 就地待命</button>
-        <button class="btn btn-secondary" onclick="sendKey('p', true); setTimeout(()=>sendKey('p', false), 50)">[P] 暂停/开始</button>
-        <button class="btn btn-secondary" onclick="sendKey('r', true); setTimeout(()=>sendKey('r', false), 50)">[R] 重置战局</button>
+        <button class="btn" id="btn-tab" onclick="sendKey('tab', true); setTimeout(()=>sendKey('tab', false), 50)">[Tab] 切换微操坦克</button>
+        <button class="btn btn-secondary" id="btn-b" onclick="sendKey('b', true); setTimeout(()=>sendKey('b', false), 50)">[B] 自动开路</button>
+        <button class="btn btn-secondary" id="btn-1" onclick="sendKey('1', true); setTimeout(()=>sendKey('1', false), 50)">[1] 自由交战</button>
+        <button class="btn btn-secondary" id="btn-2" onclick="sendKey('2', true); setTimeout(()=>sendKey('2', false), 50)">[2] 坚守阵地</button>
+        <button class="btn btn-secondary" id="btn-3" onclick="sendKey('3', true); setTimeout(()=>sendKey('3', false), 50)">[3] 护卫单位</button>
+        <button class="btn btn-secondary" id="btn-s" onclick="sendKey('s', true); setTimeout(()=>sendKey('s', false), 50)">[S] 就地待命</button>
+        <button class="btn btn-secondary" id="btn-p" onclick="sendKey('p', true); setTimeout(()=>sendKey('p', false), 50)">[P] 暂停/开始</button>
+        <button class="btn btn-secondary" id="btn-r" onclick="sendKey('r', true); setTimeout(()=>sendKey('r', false), 50)">[R] 重置战局</button>
       </div>
 
-      <div class="keys-guide">
-        <b>帝国时代操作</b>: <span class="key-tag">鼠标左键</span> 拖拽框选 | <span class="key-tag">鼠标右键</span> 移动/集火攻击 | <span class="key-tag">Tab</span> 切换微操坦克 | <span class="key-tag">方向键/空格</span> 直接微操驾驶 | <span class="key-tag">1/2/3</span> 批量战术 | <span class="key-tag">P</span> 暂停/恢复
+      <div class="keys-guide" id="keys-guide-text">
+        <b>帝国时代操作</b>: <span class="key-tag">鼠标左键</span> 拖拽框选 | <span class="key-tag">鼠标右键</span> 移动/集火/采矿 | <span class="key-tag">Tab</span> 切换微操坦克 | <span class="key-tag">方向键/空格</span> 驾驶射击 | <span class="key-tag">1/2/3</span> 战术姿态 | <span class="key-tag">P</span> 暂停/恢复
       </div>
     </footer>
   </main>
 
   <script>
+    // ================= 双语字典支持 (Bilingual i18n) =================
+    const I18N = {
+      zh: {
+        logo: "RTS COMMAND",
+        title: "小霸王坦克大战 · 装甲集群微操终端",
+        connecting: "连接中...",
+        connected: "已连接",
+        disconnected: "连接断开",
+        disconnected_overlay: "⚠️ 远程 VNC 连接断开",
+        reconnect: "重新连接",
+        lang_btn: "🌐 English",
+        dm_tag: "暗物质:",
+        alloy_tag: "合金:",
+        blocks_tag: "资源矿点:",
+        enemy_res_prefix: "敌方资源:",
+        hud_allies: "我方",
+        hud_selected: "选中",
+        hud_spotted: "侦测",
+        hud_enemies: "敌军",
+        hud_fortress: "鹰巢",
+        safe: "安全",
+        lost: "失守!",
+        game_over: "GAME OVER - 作战失败 (按 R 重新开始)",
+        victory: "★ 战役大捷！达成作战目标 (按 R 重新开始)",
+        ammo_inf: "弹药:无限",
+        ammo_empty: "弹药:0 (耗尽!)",
+        ammo_count: "弹药",
+        tactic: "战术",
+        clr_on: "开路:ON",
+        clr_off: "开路:OFF",
+        btn_tab: "[Tab] 切换微操坦克",
+        btn_b: "[B] 自动开路",
+        btn_1: "[1] 自由交战",
+        btn_2: "[2] 坚守阵地",
+        btn_3: "[3] 护卫单位",
+        btn_s: "[S] 就地待命",
+        btn_p: "[P] 暂停/开始",
+        btn_r: "[R] 重置战局",
+        keys_guide: "<b>帝国时代操作</b>: <span class='key-tag'>鼠标左键</span> 拖拽框选 | <span class='key-tag'>鼠标右键</span> 移动/集火/采矿 | <span class='key-tag'>Tab</span> 切换微操坦克 | <span class='key-tag'>方向键/空格</span> 驾驶射击 | <span class='key-tag'>1/2/3</span> 战术姿态 | <span class='key-tag'>P</span> 暂停/恢复"
+      },
+      en: {
+        logo: "RTS COMMAND",
+        title: "Battle City - Armor Battalion RTS Console",
+        connecting: "Connecting...",
+        connected: "Connected",
+        disconnected: "Disconnected",
+        disconnected_overlay: "⚠️ Remote VNC Connection Lost",
+        reconnect: "Reconnect",
+        lang_btn: "🌐 中文",
+        dm_tag: "Dark Matter:",
+        alloy_tag: "Alloy:",
+        blocks_tag: "Resource Nodes:",
+        enemy_res_prefix: "Enemy Res:",
+        hud_allies: "Allies",
+        hud_selected: "Selected",
+        hud_spotted: "Spotted",
+        hud_enemies: "Enemies",
+        hud_fortress: "Fortress",
+        safe: "Safe",
+        lost: "Lost!",
+        game_over: "GAME OVER - Mission Failed (Press R to restart)",
+        victory: "★ VICTORY! Mission Objectives Complete (Press R to restart)",
+        ammo_inf: "Ammo:Inf",
+        ammo_empty: "Ammo:0 (Empty!)",
+        ammo_count: "Ammo",
+        tactic: "Tactic",
+        clr_on: "Clear:ON",
+        clr_off: "Clear:OFF",
+        btn_tab: "[Tab] Cycle Micro Unit",
+        btn_b: "[B] Auto Clear",
+        btn_1: "[1] Aggressive",
+        btn_2: "[2] Defensive",
+        btn_3: "[3] Guard Unit",
+        btn_s: "[S] Stop & Hold",
+        btn_p: "[P] Pause/Resume",
+        btn_r: "[R] Reset Mission",
+        keys_guide: "<b>Controls</b>: <span class='key-tag'>Left Click</span> Box Drag | <span class='key-tag'>Right Click</span> Move/Attack/Harvest | <span class='key-tag'>Tab</span> Cycle Unit | <span class='key-tag'>Arrows/Space</span> Drive & Shoot | <span class='key-tag'>1/2/3</span> Tactics | <span class='key-tag'>P</span> Pause"
+      }
+    };
+
+    let currentLang = localStorage.getItem('tanks_vnc_lang') || 'zh';
+
+    function toggleLanguage() {
+      currentLang = (currentLang === 'zh') ? 'en' : 'zh';
+      localStorage.setItem('tanks_vnc_lang', currentLang);
+      applyLanguage();
+    }
+
+    function applyLanguage() {
+      const dict = I18N[currentLang];
+      document.getElementById('lbl-logo').innerText = dict.logo;
+      document.getElementById('lbl-title').innerText = dict.title;
+      document.getElementById('btn-lang').innerText = dict.lang_btn;
+      document.getElementById('lbl-dm-tag').innerText = dict.dm_tag;
+      document.getElementById('lbl-alloy-tag').innerText = dict.alloy_tag;
+      document.getElementById('lbl-blocks-tag').innerText = dict.blocks_tag;
+      document.getElementById('lbl-disconnected-msg').innerText = dict.disconnected_overlay;
+      document.getElementById('btn-reconnect').innerText = dict.reconnect;
+
+      document.getElementById('btn-tab').innerText = dict.btn_tab;
+      document.getElementById('btn-b').innerText = dict.btn_b;
+      document.getElementById('btn-1').innerText = dict.btn_1;
+      document.getElementById('btn-2').innerText = dict.btn_2;
+      document.getElementById('btn-3').innerText = dict.btn_3;
+      document.getElementById('btn-s').innerText = dict.btn_s;
+      document.getElementById('btn-p').innerText = dict.btn_p;
+      document.getElementById('btn-r').innerText = dict.btn_r;
+
+      document.getElementById('keys-guide-text').innerHTML = dict.keys_guide;
+
+      if (lastStatusData) {
+        updateHud(lastStatusData);
+      }
+    }
+
     const canvas = document.getElementById('vnc-canvas');
     const ctx = canvas.getContext('2d');
     const connIndicator = document.getElementById('conn-indicator');
@@ -281,10 +481,18 @@
     const hudStatus = document.getElementById('hud-status');
     const hudMicro = document.getElementById('hud-micro');
 
+    const hudResDm = document.getElementById('hud-res-dm');
+    const hudRateDm = document.getElementById('hud-rate-dm');
+    const hudResAlloy = document.getElementById('hud-res-alloy');
+    const hudRateAlloy = document.getElementById('hud-rate-alloy');
+    const hudResBlocks = document.getElementById('hud-res-blocks');
+    const hudResEnemy = document.getElementById('hud-res-enemy');
+
     let ws = null;
     let frameCount = 0;
     let lastFpsTime = performance.now();
     let lastPingTime = 0;
+    let lastStatusData = null;
 
     let isDragging = false;
     let dragStartX = 0, dragStartY = 0;
@@ -297,7 +505,8 @@
 
     function initWebSocket() {
       const url = getWsUrl();
-      connText.innerText = "Connecting...";
+      const dict = I18N[currentLang];
+      connText.innerText = dict.connecting;
       connIndicator.classList.remove('connected');
       overlay.style.display = 'none';
 
@@ -305,7 +514,7 @@
       ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
-        connText.innerText = "Connected";
+        connText.innerText = dict.connected;
         connIndicator.classList.add('connected');
         overlay.style.display = 'none';
         canvas.focus();
@@ -313,7 +522,7 @@
       };
 
       ws.onclose = () => {
-        connText.innerText = "Disconnected";
+        connText.innerText = dict.disconnected;
         connIndicator.classList.remove('connected');
         overlay.style.display = 'flex';
       };
@@ -328,6 +537,7 @@
           try {
             const data = JSON.parse(event.data);
             if (data.type === 'status') {
+              lastStatusData = data;
               updateHud(data);
             } else if (data.type === 'pong') {
               const rtt = Math.round(performance.now() - lastPingTime);
@@ -341,12 +551,20 @@
     function renderFrame(arrayBuffer) {
       const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
       createImageBitmap(blob).then(bitmap => {
+        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+        }
         ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
         bitmap.close();
       }).catch(err => {
         const url = URL.createObjectURL(blob);
         const img = new Image();
         img.onload = () => {
+          if (canvas.width !== img.width || canvas.height !== img.height) {
+            canvas.width = img.width;
+            canvas.height = img.height;
+          }
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
           URL.revokeObjectURL(url);
         };
@@ -355,6 +573,7 @@
     }
 
     function updateHud(status) {
+      const dict = I18N[currentLang];
       const aliveP = status.alive_players || 0;
       const enemies = status.enemies_left !== undefined ? status.enemies_left : 0;
       const spotted = status.enemies_spotted !== undefined ? status.enemies_spotted : enemies;
@@ -363,30 +582,61 @@
       const microId = status.micro_tank_id || "--";
       const microTactic = status.micro_tactic || "manual";
       const autoClr = status.micro_auto_clear;
-      const clrStr = autoClr ? "开路:ON" : "开路:OFF";
+      const clrStr = autoClr ? dict.clr_on : dict.clr_off;
 
       const microAmmo = status.micro_ammo !== undefined ? status.micro_ammo : -1;
-      let ammoStr = "弹药:无限";
+      let ammoStr = dict.ammo_inf;
       if (microAmmo !== -1) {
-        ammoStr = microAmmo === 0 ? "弹药:0 (耗尽!)" : `弹药:${microAmmo}`;
+        ammoStr = microAmmo === 0 ? dict.ammo_empty : `${dict.ammo_count}:${microAmmo}`;
       }
 
       const fogOn = status.fog_enabled;
-      const enemyStr = fogOn ? `侦测:${spotted}/${enemies}` : `敌军:${enemies}`;
-      const baseStr = baseAlive ? "安全" : "失守!";
+      const enemyStr = fogOn ? `${dict.hud_spotted}:${spotted}/${enemies}` : `${dict.hud_enemies}:${enemies}`;
+      const baseStr = baseAlive ? dict.safe : dict.lost;
 
+      // 1. 刷新主要战况条
       if (status.game_over) {
-        hudStatus.innerText = `GAME OVER - ` + (status.defeat_desc || "作战失败") + " (按 R 重新开始)";
+        hudStatus.innerText = (dict.game_over || "GAME OVER") + " - " + (status.defeat_desc || "");
         hudStatus.style.color = "#E74C3C";
       } else if (status.game_victory) {
-        hudStatus.innerText = `★ 战役大捷！` + (status.victory_desc || "达成作战目标") + " (按 R 重新开始)";
+        hudStatus.innerText = (dict.victory || "VICTORY") + " - " + (status.victory_desc || "");
         hudStatus.style.color = "#F1C40F";
       } else {
-        hudStatus.innerText = `我方:${aliveP} | 选中:${selected} | ${enemyStr} | 鹰巢:${baseStr}`;
+        hudStatus.innerText = `${dict.hud_allies}:${aliveP} | ${dict.hud_selected}:${selected} | ${enemyStr} | ${dict.hud_fortress}:${baseStr}`;
         hudStatus.style.color = "#4AF626";
       }
 
-      hudMicro.innerText = `[${microId} | ${ammoStr} | 战术:${microTactic} | ${clrStr}]`;
+      hudMicro.innerText = `[${microId} | ${ammoStr} | ${dict.tactic}:${microTactic} | ${clrStr}]`;
+
+      // 2. 刷新资源储备面板 (暗物质、合金与矿点)
+      const res = status.resources || {};
+      const rates = status.resource_rates || {};
+      const dmVal = parseFloat(res.dark_matter || 0.0);
+      const alloyVal = parseFloat(res.alloy || 0.0);
+      const dmRate = parseFloat(rates.dark_matter || 0.0);
+      const alloyRate = parseFloat(rates.alloy || 0.0);
+
+      hudResDm.innerText = dmVal.toFixed(1);
+      hudRateDm.innerText = `(${dmRate >= 0 ? '+' : ''}${dmRate.toFixed(1)}/s)`;
+      hudResAlloy.innerText = alloyVal.toFixed(1);
+      hudRateAlloy.innerText = `(${alloyRate >= 0 ? '+' : ''}${alloyRate.toFixed(1)}/s)`;
+
+      const blocks = status.resource_blocks || [];
+      if (blocks.length > 0) {
+        let dmBlocks = 0, alloyBlocks = 0;
+        blocks.forEach(b => {
+          if (b.type === 'dark_matter' && b.amount > 0) dmBlocks++;
+          else if (b.type === 'alloy' && b.amount > 0) alloyBlocks++;
+        });
+        hudResBlocks.innerText = `🔮 ${dmBlocks} | ⚙️ ${alloyBlocks}`;
+      } else {
+        hudResBlocks.innerText = `--`;
+      }
+
+      const enemyRes = status.enemy_resources || {};
+      const eDm = parseFloat(enemyRes.dark_matter || 0.0).toFixed(1);
+      const eAlloy = parseFloat(enemyRes.alloy || 0.0).toFixed(1);
+      hudResEnemy.innerText = `${dict.enemy_res_prefix} 🔮 ${eDm} | ⚙️ ${eAlloy}`;
     }
 
     setInterval(() => {
@@ -430,12 +680,10 @@
       canvas.focus();
       const pt = getCanvasCoords(e);
       if (e.button === 0) {
-        // 左键拉框
         isDragging = true;
         dragStartX = pt.x;
         dragStartY = pt.y;
       } else if (e.button === 2) {
-        // 右键指令
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'context_cmd',
@@ -477,10 +725,8 @@
       }
     });
 
-    // 禁用默认右键菜单
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // 键盘监听
     const interceptKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Space', 'w', 'a', 's', 'd', 'r', 'Tab', '1', '2', '3', 'b', 'B', 'p', 'P'];
     window.addEventListener('keydown', (e) => {
       if (interceptKeys.includes(e.key)) {
@@ -497,6 +743,7 @@
     });
 
     window.onload = () => {
+      applyLanguage();
       initWebSocket();
       canvas.focus();
     };

@@ -292,7 +292,7 @@ class HeadlessGameRunner(QObject):
                     self.resume()
                 else:
                     self.pause()
-            elif norm_key == "r" and (self.game_over or self.game_victory):
+            elif norm_key == "r":
                 self.restart()
         else:
             self.active_keys.discard(norm_key)
@@ -317,18 +317,19 @@ class HeadlessGameRunner(QObject):
         if not micro or not micro.alive:
             return False
 
-        direction = None
+        vx = 0.0
+        vy = 0.0
         if "arrowup" in self.active_keys or "w" in self.active_keys or "up" in self.active_keys:
-            direction = Direction.UP
-        elif "arrowdown" in self.active_keys or "down" in self.active_keys:
-            direction = Direction.DOWN
-        elif "arrowleft" in self.active_keys or "a" in self.active_keys or "left" in self.active_keys:
-            direction = Direction.LEFT
-        elif "arrowright" in self.active_keys or "d" in self.active_keys or "right" in self.active_keys:
-            direction = Direction.RIGHT
+            vy -= 1.0
+        if "arrowdown" in self.active_keys or "s" in self.active_keys or "down" in self.active_keys:
+            vy += 1.0
+        if "arrowleft" in self.active_keys or "a" in self.active_keys or "left" in self.active_keys:
+            vx -= 1.0
+        if "arrowright" in self.active_keys or "d" in self.active_keys or "right" in self.active_keys:
+            vx += 1.0
 
-        if direction is not None:
-            self.physics_engine.move_tank(micro, direction)
+        if abs(vx) > 1e-4 or abs(vy) > 1e-4:
+            self.physics_engine.move_tank(micro, (vx, vy))
             return True
         return False
 
@@ -338,7 +339,7 @@ class HeadlessGameRunner(QObject):
 
         self.game_over = False
         self.game_victory = False
-        self.is_paused = True
+        self.is_paused = False
         self.active_keys.clear()
         self.preview_box = None
         self.command_marker = None
@@ -358,7 +359,6 @@ class HeadlessGameRunner(QObject):
         if hasattr(self, "ai_script_manager") and hasattr(self, "api_controller"):
             all_tanks = self.physics_engine.player_tanks + self.physics_engine.enemy_tanks
             self.ai_script_manager.start_scripts(all_tanks, self.api_controller, self.base_dir)
-            self.ai_script_manager.pause()
 
         if self.physics_engine.player_tanks:
             self.selection_mgr.select_single(self.physics_engine.player_tanks[0])

@@ -1,7 +1,7 @@
 import math
 from enum import Enum
 from dataclasses import dataclass
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Any
 
 class Direction(Enum):
     UP = (0, -1)
@@ -20,6 +20,37 @@ class Direction(Enum):
     @classmethod
     def all_directions(cls) -> List["Direction"]:
         return [cls.UP, cls.DOWN, cls.LEFT, cls.RIGHT]
+
+    @classmethod
+    def from_angle(cls, angle_deg: float) -> "Direction":
+        """将自由角度映射到最近的四向正交枚举"""
+        deg = float(angle_deg) % 360.0
+        if 45.0 <= deg < 135.0:
+            return cls.RIGHT
+        elif 135.0 <= deg < 225.0:
+            return cls.DOWN
+        elif 225.0 <= deg < 315.0:
+            return cls.LEFT
+        else:
+            return cls.UP
+
+    @classmethod
+    def from_vector(cls, dx: float, dy: float) -> "Direction":
+        if abs(dx) < 1e-5 and abs(dy) < 1e-5:
+            return cls.UP
+        angle_deg = math.degrees(math.atan2(dx, -dy)) % 360.0
+        return cls.from_angle(angle_deg)
+
+    def to_angle(self) -> float:
+        if self == Direction.UP:
+            return 0.0
+        elif self == Direction.RIGHT:
+            return 90.0
+        elif self == Direction.DOWN:
+            return 180.0
+        elif self == Direction.LEFT:
+            return 270.0
+        return 0.0
 
 
 class Camp(Enum):
@@ -48,16 +79,53 @@ class Rect:
 
 
 class Bullet:
-    def __init__(self, x: float, y: float, direction: Direction, speed: float, size: int,
-                 camp: Camp = Camp.PLAYER, color: str = "#FFFFFF"):
+    def __init__(self, x: float, y: float, direction: Any, speed: float, size: int,
+                 camp: Camp = Camp.PLAYER, color: str = "#FFFFFF", angle: Optional[float] = None):
         self.x = x
         self.y = y
-        self.direction = direction
         self.speed = speed
         self.size = size
         self.camp = camp
         self.color = color
         self.alive = True
+
+        if angle is not None:
+            self._angle = float(angle) % 360.0
+        elif isinstance(direction, Direction):
+            self._angle = direction.to_angle()
+        elif isinstance(direction, (int, float)):
+            self._angle = float(direction) % 360.0
+        else:
+            self._angle = 0.0
+
+        rad = math.radians(self._angle)
+        self.vx = math.sin(rad) * self.speed
+        self.vy = -math.cos(rad) * self.speed
+
+    @property
+    def angle(self) -> float:
+        return self._angle
+
+    @angle.setter
+    def angle(self, val: float) -> None:
+        self._angle = float(val) % 360.0
+        rad = math.radians(self._angle)
+        self.vx = math.sin(rad) * self.speed
+        self.vy = -math.cos(rad) * self.speed
+
+    @property
+    def direction(self) -> Direction:
+        return Direction.from_angle(self._angle)
+
+    @direction.setter
+    def direction(self, val: Any) -> None:
+        if isinstance(val, Direction):
+            self._angle = val.to_angle()
+        elif isinstance(val, (int, float)):
+            self._angle = float(val) % 360.0
+        rad = math.radians(self._angle)
+        self.vx = math.sin(rad) * self.speed
+        self.vy = -math.cos(rad) * self.speed
 
     @property
     def rect(self) -> Rect:
@@ -66,8 +134,8 @@ class Bullet:
     def update(self) -> None:
         if not self.alive:
             return
-        self.x += self.direction.dx * self.speed
-        self.y += self.direction.dy * self.speed
+        self.x += self.vx
+        self.y += self.vy
 
 
 @dataclass
@@ -91,7 +159,8 @@ class Tank:
                  is_tower: bool = False, can_attack: bool = True, tower_type: str = "general",
                  resupply_radius: float = 0.0, resupply_interval: int = 30,
                  unit_type: str = "tank", controllable: bool = True,
-                 ai_script: Optional[str] = None):
+                 ai_script: Optional[str] = None,
+                 angle: Optional[float] = None):
         self.id = tank_id
         self.unit_type = unit_type
         self.x = x
@@ -99,7 +168,10 @@ class Tank:
         self.size = size
         self.speed = speed
         self.camp = camp
-        self.direction = Direction.UP if camp == Camp.PLAYER else Direction.DOWN
+        if angle is not None:
+            self._angle = float(angle) % 360.0
+        else:
+            self._angle = 0.0 if camp == Camp.PLAYER else 180.0
         self.color = color
         self.fire_cooldown_max = 15
         self.fire_cooldown = 0
@@ -127,6 +199,25 @@ class Tank:
         self.resupply_interval = resupply_interval
         self.resupply_timer = 0
         self.just_resupplied_timer = 0  # 获得补给视觉闪烁标记
+
+    @property
+    def angle(self) -> float:
+        return self._angle
+
+    @angle.setter
+    def angle(self, val: float) -> None:
+        self._angle = float(val) % 360.0
+
+    @property
+    def direction(self) -> Direction:
+        return Direction.from_angle(self._angle)
+
+    @direction.setter
+    def direction(self, val: Any) -> None:
+        if isinstance(val, Direction):
+            self._angle = val.to_angle()
+        elif isinstance(val, (int, float)):
+            self._angle = float(val) % 360.0
 
     @property
     def rect(self) -> Rect:

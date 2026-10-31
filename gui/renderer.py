@@ -1,3 +1,4 @@
+import math
 from typing import List, Optional
 from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFont, QImage
 from PyQt5.QtCore import QRectF, Qt
@@ -123,33 +124,21 @@ class PixelRenderer:
             painter.setPen(QPen(QColor("#E67E22")))
             painter.drawText(QRectF(x - 10, y - 12, size + 20, 10), Qt.AlignCenter, "[开路]")
 
-        # 3. 品字形方块
-        if tank.direction == Direction.UP:
-            squares = [
-                (x + unit / 2.0, y),
-                (x, y + unit),
-                (x + unit, y + unit)
-            ]
-        elif tank.direction == Direction.DOWN:
-            squares = [
-                (x + unit / 2.0, y + unit),
-                (x, y),
-                (x + unit, y)
-            ]
-        elif tank.direction == Direction.LEFT:
-            squares = [
-                (x, y + unit / 2.0),
-                (x + unit, y),
-                (x + unit, y + unit)
-            ]
-        elif tank.direction == Direction.RIGHT:
-            squares = [
-                (x + unit, y + unit / 2.0),
-                (x, y),
-                (x, y + unit)
-            ]
-        else:
-            squares = [(x, y), (x + unit, y), (x, y + unit)]
+        # 3. 品字形方块（支持自由旋转角度）
+        painter.save()
+        cx = x + size / 2.0
+        cy = y + size / 2.0
+        painter.translate(cx, cy)
+        painter.rotate(tank.angle)
+
+        lx = -size / 2.0
+        ly = -size / 2.0
+        # 基准朝上品字形：(前置主炮, 后置左履带, 后置右履带)
+        squares = [
+            (lx + unit / 2.0, ly),
+            (lx, ly + unit),
+            (lx + unit, ly + unit)
+        ]
 
         for i, (sx, sy) in enumerate(squares):
             rect = QRectF(sx, sy, unit, unit)
@@ -169,6 +158,8 @@ class PixelRenderer:
                 pad = unit * 0.35
                 muzzle_color = QColor("#D35400") if auto_clear else QColor("#000000")
                 painter.fillRect(QRectF(sx + pad, sy + pad, unit - pad * 2, unit - pad * 2), muzzle_color)
+
+        painter.restore()
 
         # 4. 血条、补给特效与弹药
         top_offset = 18 if (is_micro or auto_clear) else 8
@@ -257,11 +248,13 @@ class PixelRenderer:
             painter.drawText(QRectF(x - 15, y - 14, size + 30, 10), Qt.AlignCenter, "[RADAR]")
 
         elif tower.tower_type == "cannon":
-            # 带炮台的加农防御塔：中心粗壮旋转加农炮口
+            # 带炮台的加农防御塔：中心粗壮旋转加农炮口（支持全向旋转）
             cannon_len = size * 0.45
             bar_w = size * 0.22
-            p_dx = tower.direction.dx * cannon_len
-            p_dy = tower.direction.dy * cannon_len
+            t_angle = getattr(tower, "angle", tower.direction.to_angle())
+            rad = math.radians(t_angle)
+            p_dx = math.sin(rad) * cannon_len
+            p_dy = -math.cos(rad) * cannon_len
             painter.fillRect(QRectF(cx - bar_w / 2.0 + p_dx * 0.4, cy - bar_w / 2.0 + p_dy * 0.4, bar_w, bar_w), QColor("#000000"))
 
             # 炮塔座
@@ -305,38 +298,29 @@ class PixelRenderer:
         bullet_color = QColor(bullet.color)
         border_pen = QPen(QColor("#000000"), 1)
 
-        if bullet.direction == Direction.UP:
-            squares = [
-                (x + unit / 2.0, y),
-                (x, y + unit),
-                (x + unit, y + unit)
-            ]
-        elif bullet.direction == Direction.DOWN:
-            squares = [
-                (x + unit / 2.0, y + unit),
-                (x, y),
-                (x + unit, y)
-            ]
-        elif bullet.direction == Direction.LEFT:
-            squares = [
-                (x, y + unit / 2.0),
-                (x + unit, y),
-                (x + unit, y + unit)
-            ]
-        elif bullet.direction == Direction.RIGHT:
-            squares = [
-                (x + unit, y + unit / 2.0),
-                (x, y),
-                (x, y + unit)
-            ]
-        else:
-            squares = [(x, y), (x + unit, y), (x, y + unit)]
+        painter.save()
+        bcx = bullet.x + bullet.size / 2.0
+        bcy = bullet.y + bullet.size / 2.0
+        painter.translate(bcx, bcy)
+        b_angle = getattr(bullet, "angle", bullet.direction.to_angle())
+        painter.rotate(b_angle)
+
+        lx = -bullet.size / 2.0
+        ly = -bullet.size / 2.0
+        # 向上发射基准品字形
+        squares = [
+            (lx + unit / 2.0, ly),
+            (lx, ly + unit),
+            (lx + unit, ly + unit)
+        ]
 
         for sx, sy in squares:
             rect = QRectF(sx, sy, unit, unit)
             painter.fillRect(rect, bullet_color)
             painter.setPen(border_pen)
             painter.drawRect(rect)
+
+        painter.restore()
 
     @staticmethod
     def draw_selection_box(painter: QPainter, x1: float, y1: float, x2: float, y2: float) -> None:

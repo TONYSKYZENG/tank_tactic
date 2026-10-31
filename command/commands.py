@@ -20,6 +20,7 @@ class BaseCommand(ABC):
         col1, row1 = int(round(x1 / tile_size)), int(round(y1 / tile_size))
         col2, row2 = int(round(x2 / tile_size)), int(round(y2 / tile_size))
 
+        # 快速正交路径检测
         if col1 == col2:
             step = 1 if row2 > row1 else -1
             for r in range(row1 + step, row2, step):
@@ -34,7 +35,25 @@ class BaseCommand(ABC):
                     if game_map.get_tile(c, row1) in (TileType.BRICK, TileType.STEEL, TileType.BASE):
                         return False
             return True
-        return False
+
+        # 自由 360° 射线穿透检测 (Raycasting)
+        dx = x2 - x1
+        dy = y2 - y1
+        dist = math.hypot(dx, dy)
+        if dist < 1.0:
+            return True
+
+        steps = max(2, int(dist / (tile_size * 0.4)))
+        for i in range(1, steps):
+            t = i / float(steps)
+            px = x1 + dx * t
+            py = y1 + dy * t
+            c = int(px // tile_size)
+            r = int(py // tile_size)
+            if 0 <= c < game_map.cols and 0 <= r < game_map.rows:
+                if game_map.get_tile(c, r) in (TileType.BRICK, TileType.STEEL, TileType.BASE):
+                    return False
+        return True
 
 
 class MoveCommand(BaseCommand):
@@ -153,13 +172,14 @@ class MoveCommand(BaseCommand):
 
         dx = target_x - tank.x
         dy = target_y - tank.y
+        dist_to_target = math.hypot(dx, dy)
 
-        if abs(dx) > abs(dy):
-            primary = Direction.RIGHT if dx > 0 else Direction.LEFT
-            secondary = Direction.DOWN if dy > 0 else Direction.UP
+        if dist_to_target > 1e-4:
+            move_angle = math.degrees(math.atan2(dx, -dy)) % 360.0
         else:
-            primary = Direction.DOWN if dy > 0 else Direction.UP
-            secondary = Direction.RIGHT if dx > 0 else Direction.LEFT
+            move_angle = tank.angle
+
+        primary = Direction.from_angle(move_angle)
 
         cfg = getattr(tank, "_config", None)
         b_speed = cfg.bullet_speed if cfg else 6.0
@@ -173,47 +193,32 @@ class MoveCommand(BaseCommand):
                          game_map.get_tile(target_col, target_row) == TileType.BRICK)
 
         if next_is_brick or self._check_front_has_brick(tank, primary, game_map):
-            tank.direction = primary
+            tank.angle = move_angle
             if tank.can_fire(physics_engine.limited_ammo_enabled):
-                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
+                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=move_angle)
             return False
 
-        moved = physics_engine.move_tank(tank, primary)
+        # 自由全向推进机动
+        moved = physics_engine.move_tank(tank, (dx, dy))
         blocking_tank = None
 
         if not moved:
-            step_x = tank.x + primary.dx * tank.speed
-            step_y = tank.y + primary.dy * tank.speed
+            step_x = tank.x + (dx / dist_to_target if dist_to_target > 0 else 0) * tank.speed
+            step_y = tank.y + (dy / dist_to_target if dist_to_target > 0 else 0) * tank.speed
             blocking_tank = physics_engine.get_blocking_tank(tank, step_x, step_y)
 
             # 阻挡者为敌军时，主动朝敌军开火迎击
             if blocking_tank and blocking_tank.camp != tank.camp:
-                tank.direction = primary
+                tank.angle = move_angle
                 if tank.can_fire(physics_engine.limited_ammo_enabled):
-                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
-
-            if abs(dx) > 2 or abs(dy) > 2:
-                if self._check_front_has_brick(tank, secondary, game_map):
-                    tank.direction = secondary
-                    if tank.can_fire(physics_engine.limited_ammo_enabled):
-                        physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
-                    return False
-
-                moved = physics_engine.move_tank(tank, secondary)
-                if not moved and not blocking_tank:
-                    sec_x = tank.x + secondary.dx * tank.speed
-                    sec_y = tank.y + secondary.dy * tank.speed
-                    blocking_tank = physics_engine.get_blocking_tank(tank, sec_x, sec_y)
+                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=move_angle)
 
         # 侧向滑步规避脱困 (Lateral Evasion)
         if not moved and blocking_tank:
             self.blocking_tank_id = blocking_tank.id
-            if primary in (Direction.UP, Direction.DOWN):
-                lateral_dirs = [Direction.LEFT, Direction.RIGHT]
-            else:
-                lateral_dirs = [Direction.UP, Direction.DOWN]
-            for l_dir in lateral_dirs:
-                if physics_engine.move_tank(tank, l_dir):
+            lateral_angles = [(move_angle + 90.0) % 360.0, (move_angle - 90.0) % 360.0]
+            for l_angle in lateral_angles:
+                if physics_engine.move_tank(tank, l_angle):
                     moved = True
                     break
 
@@ -276,9 +281,9 @@ class AttackTargetCommand(BaseCommand):
         dy = target_center_y - center_y
         dist = math.hypot(dx, dy)
 
-        # 视线轴向对齐阈值：确保对齐后射击弹道切实覆盖目标包围盒
-        align_threshold = min(20.0, tank.size * 0.55)
+        target_angle = (math.degrees(math.atan2(dx, -dy))) % 360.0
 
+        align_threshold = min(20.0, tank.size * 0.55)
         is_aligned_v = abs(dx) <= align_threshold
         is_aligned_h = abs(dy) <= align_threshold
 
@@ -287,39 +292,23 @@ class AttackTargetCommand(BaseCommand):
         b_size = cfg.bullet_size if cfg else 12
         b_color = cfg.bullet_color if cfg else ("#E69C24" if tank.camp == Camp.PLAYER else "#E63946")
 
-        # 1. 检查垂直轴对齐当前目标开火
-        if is_aligned_v:
-            tank.direction = Direction.DOWN if dy > 0 else Direction.UP
-            los_clear = self.is_line_of_sight_clear(center_x, center_y, target_center_x, target_center_y, game_map)
-            if los_clear:
-                self.stuck_attack_frames = 0
+        # 1. 自由 360° 全向瞄准视线与直接射击
+        los_clear = self.is_line_of_sight_clear(center_x, center_y, target_center_x, target_center_y, game_map)
+        if los_clear:
+            tank.angle = target_angle
+            self.stuck_attack_frames = 0
+            if tank.can_fire(physics_engine.limited_ammo_enabled):
+                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=target_angle)
+        else:
+            is_infinite = (tank.ammo < 0 or not physics_engine.limited_ammo_enabled)
+            if is_infinite and (is_aligned_v or is_aligned_h):
+                tank.angle = target_angle
                 if tank.can_fire(physics_engine.limited_ammo_enabled):
-                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
-                return False
-            else:
-                is_infinite = (tank.ammo < 0 or not physics_engine.limited_ammo_enabled)
-                if is_infinite and tank.can_fire(physics_engine.limited_ammo_enabled):
                     self.stuck_attack_frames = 0
-                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
+                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=target_angle)
                     return False
 
-        # 2. 检查水平轴对齐当前目标开火
-        if is_aligned_h:
-            tank.direction = Direction.RIGHT if dx > 0 else Direction.LEFT
-            los_clear = self.is_line_of_sight_clear(center_x, center_y, target_center_x, target_center_y, game_map)
-            if los_clear:
-                self.stuck_attack_frames = 0
-                if tank.can_fire(physics_engine.limited_ammo_enabled):
-                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
-                return False
-            else:
-                is_infinite = (tank.ammo < 0 or not physics_engine.limited_ammo_enabled)
-                if is_infinite and tank.can_fire(physics_engine.limited_ammo_enabled):
-                    self.stuck_attack_frames = 0
-                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
-                    return False
-
-        # 3. 机会射击 (Opportunistic Fire)：若行进轴线上有其他在视线内的敌军，趁机开火
+        # 2. 机会射击 (Opportunistic Fire)：360° 检查视野内是否有其他可直接开火的敌军
         opp_tanks = physics_engine.enemy_tanks if tank.camp == Camp.PLAYER else physics_engine.player_tanks
         if tank.camp == Camp.PLAYER and getattr(tank, "ai_script", None) is None:
             cands = physics_engine.get_visible_enemies()
@@ -333,26 +322,19 @@ class AttackTargetCommand(BaseCommand):
             cand_cy = cand.y + cand.size / 2.0
             c_dx = cand_cx - center_x
             c_dy = cand_cy - center_y
-            if abs(c_dx) <= align_threshold and math.hypot(c_dx, c_dy) < 320.0:
-                dir_cand = Direction.DOWN if c_dy > 0 else Direction.UP
-                if self.is_line_of_sight_clear(center_x, center_y, cand_cx, cand_cy, game_map):
-                    tank.direction = dir_cand
-                    if tank.can_fire(physics_engine.limited_ammo_enabled):
-                        physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
-                    break
-            elif abs(c_dy) <= align_threshold and math.hypot(c_dx, c_dy) < 320.0:
-                dir_cand = Direction.RIGHT if c_dx > 0 else Direction.LEFT
-                if self.is_line_of_sight_clear(center_x, center_y, cand_cx, cand_cy, game_map):
-                    tank.direction = dir_cand
-                    if tank.can_fire(physics_engine.limited_ammo_enabled):
-                        physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
-                    break
+            c_dist = math.hypot(c_dx, c_dy)
+            if c_dist < 260.0 and self.is_line_of_sight_clear(center_x, center_y, cand_cx, cand_cy, game_map):
+                c_angle = (math.degrees(math.atan2(c_dx, -c_dy))) % 360.0
+                tank.angle = c_angle
+                if tank.can_fire(physics_engine.limited_ammo_enabled):
+                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=c_angle)
+                break
 
         # 如果自身是固定防御塔，不执行位移
         if tank.is_tower or tank.speed <= 0:
-            tank.direction = Direction.DOWN if abs(dy) > abs(dx) and dy > 0 else (Direction.UP if abs(dy) > abs(dx) else (Direction.RIGHT if dx > 0 else Direction.LEFT))
+            tank.angle = target_angle
             if tank.can_fire(physics_engine.limited_ammo_enabled):
-                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
+                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=target_angle)
             return False
 
         # 4. 寻找进攻占位阵位 (Standoff Attack Position)

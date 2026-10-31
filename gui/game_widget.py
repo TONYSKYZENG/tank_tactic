@@ -135,7 +135,7 @@ class GameCanvasWidget(QWidget):
 
         self.game_over = False
         self.game_victory = False
-        self.is_paused = True
+        self.is_paused = False
         self.active_keys.clear()
         self.is_dragging_box = False
         self.command_marker = None
@@ -155,7 +155,6 @@ class GameCanvasWidget(QWidget):
         if hasattr(self, "ai_script_manager") and hasattr(self, "api_controller"):
             all_tanks = self.physics_engine.player_tanks + self.physics_engine.enemy_tanks
             self.ai_script_manager.start_scripts(all_tanks, self.api_controller, self.base_dir)
-            self.ai_script_manager.pause()
 
         if self.physics_engine.player_tanks:
             self.selection_mgr.select_single(self.physics_engine.player_tanks[0])
@@ -367,7 +366,7 @@ class GameCanvasWidget(QWidget):
                     self.resume()
                 else:
                     self.pause()
-            elif key == Qt.Key_R and (self.game_over or self.game_victory):
+            elif key == Qt.Key_R:
                 self.restart()
 
         event.accept()
@@ -397,19 +396,19 @@ class GameCanvasWidget(QWidget):
         if not micro or not micro.alive:
             return False
 
-        direction = None
+        vx = 0.0
+        vy = 0.0
         if Qt.Key_Up in self.active_keys or Qt.Key_W in self.active_keys:
-            direction = Direction.UP
-        elif Qt.Key_Down in self.active_keys or Qt.Key_S in self.active_keys:
-            if Qt.Key_Down in self.active_keys:
-                direction = Direction.DOWN
-        elif Qt.Key_Left in self.active_keys or Qt.Key_A in self.active_keys:
-            direction = Direction.LEFT
-        elif Qt.Key_Right in self.active_keys or Qt.Key_D in self.active_keys:
-            direction = Direction.RIGHT
+            vy -= 1.0
+        if Qt.Key_Down in self.active_keys or Qt.Key_S in self.active_keys:
+            vy += 1.0
+        if Qt.Key_Left in self.active_keys or Qt.Key_A in self.active_keys:
+            vx -= 1.0
+        if Qt.Key_Right in self.active_keys or Qt.Key_D in self.active_keys:
+            vx += 1.0
 
-        if direction is not None:
-            self.physics_engine.move_tank(micro, direction)
+        if abs(vx) > 1e-4 or abs(vy) > 1e-4:
+            self.physics_engine.move_tank(micro, (vx, vy))
             return True
         return False
 

@@ -1,6 +1,7 @@
 import random
 import time
-from typing import List, Optional, Tuple, Dict
+import math
+from typing import List, Optional, Tuple, Dict, Any
 from map_loader.models import GameMap, TileType
 from .entities import Tank, Bullet, Direction, Rect, Camp, EnemyMemoryEntry
 
@@ -55,18 +56,6 @@ class PhysicsEngine:
         for t in self.player_tanks:
             if t.alive:
                 sight_rects.append(t.get_sight_rect(map_w, map_h))
-
-        # 2. 鹰巢基地周边守备视线 (140x140 正方形)
-        tile_size = self.game_map.tile_size
-        base_center_x = self.game_map.pixel_width / 2.0
-        base_center_y = self.game_map.pixel_height - tile_size
-        base_sight_size = 144.0
-        sight_rects.append(Rect(
-            base_center_x - base_sight_size / 2.0,
-            base_center_y - base_sight_size / 2.0,
-            base_sight_size,
-            base_sight_size
-        ))
 
         return sight_rects
 
@@ -219,75 +208,114 @@ class PhysicsEngine:
 
         return aligned_start_x, aligned_start_y
 
-    def move_tank(self, tank: Tank, direction: Direction) -> bool:
+    def move_tank(self, tank: Tank, direction: Any, speed: Optional[float] = None) -> bool:
+        """
+        移动坦克（支持四向枚举、任意浮点角度 0~360°、或 2D 向量元组 (dx, dy)）
+        支持自由旋转、平滑全向机动与贴墙滑动 (Wall Sliding)
+        """
         if not tank.alive or tank.is_tower or tank.speed <= 0:
             return False
 
         tile_size = self.game_map.tile_size
-        tank.direction = direction
+        step_speed = tank.speed if speed is None else float(speed)
+
+        if isinstance(direction, Direction):
+            angle = direction.to_angle()
+            tank.angle = angle
+            dx_norm = float(direction.dx)
+            dy_norm = float(direction.dy)
+        elif isinstance(direction, (int, float)):
+            angle = float(direction) % 360.0
+            tank.angle = angle
+            rad = math.radians(angle)
+            dx_norm = math.sin(rad)
+            dy_norm = -math.cos(rad)
+        elif isinstance(direction, (tuple, list)) and len(direction) == 2:
+            vx, vy = float(direction[0]), float(direction[1])
+            dist = math.hypot(vx, vy)
+            if dist < 1e-5:
+                return False
+            dx_norm = vx / dist
+            dy_norm = vy / dist
+            angle = math.degrees(math.atan2(dx_norm, -dy_norm)) % 360.0
+            tank.angle = angle
+        else:
+            return False
 
         curr_x, curr_y = tank.x, tank.y
         align_threshold = tile_size * 0.45
 
-        # 连续通道中心线对齐：沿主方向移动时，自动将垂直轴向平滑吸附到通道中心，彻底避免刮蹭砖块卡死
-        if direction in (Direction.UP, Direction.DOWN):
+        # 连续通道中心线对齐微调：若行进方向接近正交轴向，自动吸附避免刮蹭砖块
+        if abs(dx_norm) < 0.15:
             nearest_col = round(curr_x / tile_size)
             target_x = nearest_col * tile_size
             diff_x = abs(curr_x - target_x)
             if diff_x <= align_threshold:
-                step_x = min(tank.speed, diff_x)
+                step_x = min(step_speed, diff_x)
                 cand_x = curr_x + (step_x if target_x > curr_x else -step_x) if diff_x > 0.05 else target_x
                 if self.can_move_to(tank, cand_x, curr_y):
                     curr_x = cand_x
-        elif direction in (Direction.LEFT, Direction.RIGHT):
+        elif abs(dy_norm) < 0.15:
             nearest_row = round(curr_y / tile_size)
             target_y = nearest_row * tile_size
             diff_y = abs(curr_y - target_y)
             if diff_y <= align_threshold:
-                step_y = min(tank.speed, diff_y)
+                step_y = min(step_speed, diff_y)
                 cand_y = curr_y + (step_y if target_y > curr_y else -step_y) if diff_y > 0.05 else target_y
                 if self.can_move_to(tank, curr_x, cand_y):
                     curr_y = cand_y
 
-        new_x = curr_x + direction.dx * tank.speed
-        new_y = curr_y + direction.dy * tank.speed
+        vx = dx_norm * step_speed
+        vy = dy_norm * step_speed
+
+        # 1. 优先尝试沿目标向量完整位移
+        new_x = curr_x + vx
+        new_y = curr_y + vy
 
         if self.can_move_to(tank, new_x, new_y):
             tank.x = new_x
             tank.y = new_y
             return True
-        else:
-            tank.x = curr_x
-            tank.y = curr_y
-            return False
 
-    def spawn_bullet(self, tank: Tank, bullet_speed: float, bullet_size: int, color: str = "#FFFFFF") -> Optional[Bullet]:
-        """发射炮弹（含有限弹药消耗与判定）"""
+        # 2. 贴墙滑动 (Wall Sliding)：斜向遇障碍时，分解为 X 与 Y 独立滑动
+        moved_x = False
+        moved_y = False
+        if abs(vx) > 1e-4 and self.can_move_to(tank, curr_x + vx, curr_y):
+            tank.x = curr_x + vx
+            moved_x = True
+
+        test_y_base_x = tank.x if moved_x else curr_x
+        if abs(vy) > 1e-4 and self.can_move_to(tank, test_y_base_x, curr_y + vy):
+            tank.y = curr_y + vy
+            moved_y = True
+
+        if moved_x or moved_y:
+            return True
+
+        # 无法移动，恢复原始坐标
+        tank.x = curr_x
+        tank.y = curr_y
+        return False
+
+    def spawn_bullet(self, tank: Tank, bullet_speed: float, bullet_size: int,
+                     color: str = "#FFFFFF", angle: Optional[float] = None) -> Optional[Bullet]:
+        """发射炮弹（支持 360° 任意角度瞄准发射，含有限弹药消耗与判定）"""
         if not tank.can_fire(self.limited_ammo_enabled):
             return None
 
         # 消耗一发弹药
         tank.consume_ammo(self.limited_ammo_enabled)
 
-        offset_distance = 4.0
+        shoot_angle = tank.angle if angle is None else (float(angle) % 360.0)
+        rad = math.radians(shoot_angle)
+
         center_x = tank.x + tank.size / 2.0
         center_y = tank.y + tank.size / 2.0
 
-        if tank.direction == Direction.UP:
-            bx = center_x - bullet_size / 2.0
-            by = tank.y - bullet_size - offset_distance
-        elif tank.direction == Direction.DOWN:
-            bx = center_x - bullet_size / 2.0
-            by = tank.y + tank.size + offset_distance
-        elif tank.direction == Direction.LEFT:
-            bx = tank.x - bullet_size - offset_distance
-            by = center_y - bullet_size / 2.0
-        elif tank.direction == Direction.RIGHT:
-            bx = tank.x + tank.size + offset_distance
-            by = center_y - bullet_size / 2.0
-        else:
-            bx = tank.x
-            by = tank.y
+        # 沿炮管朝向将炮弹生成在坦克包围盒外边缘
+        offset = tank.size / 2.0 + bullet_size / 2.0 + 2.0
+        bx = center_x + math.sin(rad) * offset - bullet_size / 2.0
+        by = center_y - math.cos(rad) * offset - bullet_size / 2.0
 
         bullet = Bullet(
             x=bx,
@@ -296,7 +324,8 @@ class PhysicsEngine:
             speed=bullet_speed,
             size=bullet_size,
             camp=tank.camp,
-            color=color
+            color=color,
+            angle=shoot_angle
         )
         self.bullets.append(bullet)
         tank.trigger_cooldown()

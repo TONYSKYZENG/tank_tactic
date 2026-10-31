@@ -518,11 +518,15 @@ class GameAPIController:
             }
 
         dir_str = params.get("direction")
+        angle_param = params.get("angle")
         unit_ids = [t.id for t in executable_tanks]
 
         # 若处于暂停状态，不立刻开火，暂存到 pending_actions，解除暂停后立刻执行
         if getattr(self.game_context, "is_paused", False):
-            if dir_str:
+            if angle_param is not None:
+                for tank in executable_tanks:
+                    tank.angle = float(angle_param)
+            elif dir_str:
                 d_name = str(dir_str).upper()
                 if hasattr(Direction, d_name):
                     for tank in executable_tanks:
@@ -534,7 +538,9 @@ class GameAPIController:
                 for tank in curr_executable:
                     if not tank.alive:
                         continue
-                    if dir_str:
+                    if angle_param is not None:
+                        tank.angle = float(angle_param)
+                    elif dir_str:
                         d_name = str(dir_str).upper()
                         if hasattr(Direction, d_name):
                             tank.direction = getattr(Direction, d_name)
@@ -559,7 +565,9 @@ class GameAPIController:
         for tank in executable_tanks:
             if not tank.alive:
                 continue
-            if dir_str:
+            if angle_param is not None:
+                tank.angle = float(angle_param)
+            elif dir_str:
                 d_name = str(dir_str).upper()
                 if hasattr(Direction, d_name):
                     tank.direction = getattr(Direction, d_name)
@@ -703,6 +711,7 @@ class GameAPIController:
             "y": round(target_tank.y, 2),
             "size": target_tank.size,
             "direction": target_tank.direction.name,
+            "angle": round(target_tank.angle, 1),
             "visibility": getattr(target_tank, "visibility", 1.0),
             "vision_size": target_tank.vision_size,
             "is_tower": target_tank.is_tower,

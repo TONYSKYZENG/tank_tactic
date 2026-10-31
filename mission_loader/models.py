@@ -14,6 +14,8 @@ class PlayerMissionInfo:
     vision_size: float = 280.0  # 视线正方形边长，-1 为全图视野
     ammo: int = -1              # 弹药数量，-1 为无限弹药
     visibility: float = 1.0     # 辨识度：1.0 永远可见，0.0~1.0 每 tick/查询 发现概率
+    controllable: bool = True   # 是否允许玩家手动框选或微操控制
+    ai_script: Optional[str] = None  # 独立线程战术 Python 脚本路径
 
 @dataclass
 class EnemyMissionInfo:
@@ -24,6 +26,8 @@ class EnemyMissionInfo:
     vision_size: float = 250.0  # 视线正方形边长，-1 为全图视野
     ammo: int = -1              # 弹药数量，-1 为无限弹药
     visibility: float = 1.0     # 辨识度：1.0 永远可见，0.0~1.0 每 tick 侦测概率
+    controllable: bool = False  # 敌军默认不可由玩家操控
+    ai_script: Optional[str] = None  # 独立线程战术 Python 脚本路径
 
 @dataclass
 class Mission:

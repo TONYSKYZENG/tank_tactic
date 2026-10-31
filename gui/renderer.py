@@ -182,11 +182,15 @@ class PixelRenderer:
             painter.fillRect(QRectF(bar_x, bar_y, curr_w, bar_h), QColor("#2ECC71"))
             top_offset += 5
 
-        # 补给获得特效 (+AMMO)
+        # 补给获得特效 (+AMMO) 与不可控友军 AI 标记
         if tank.just_resupplied_timer > 0:
             painter.setFont(QFont("Courier New", 8, QFont.Bold))
             painter.setPen(QPen(QColor("#2ECC71")))
             painter.drawText(QRectF(x - 10, y - top_offset - 10, size + 20, 10), Qt.AlignCenter, "+AMMO")
+        elif tank.camp == Camp.PLAYER and not getattr(tank, "controllable", True):
+            painter.setFont(QFont("Courier New", 7, QFont.Bold))
+            painter.setPen(QPen(QColor("#00D2D3")))
+            painter.drawText(QRectF(x - 15, y - top_offset - 8, size + 30, 10), Qt.AlignCenter, "[AI AUTO]")
         elif tank.camp == Camp.PLAYER and tank.ammo == 0:
             painter.setFont(QFont("Courier New", 7, QFont.Bold))
             painter.setPen(QPen(QColor("#E74C3C")))

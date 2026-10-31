@@ -1,7 +1,7 @@
 {
   "name": "Eagle Supply Fortress",
   "speed": 0.0,
-  "size": 40,
+  "size": 36,
   "color": "#D4AF37",
   "track_color": "#7D6608",
   "bullet_speed": 6.0,

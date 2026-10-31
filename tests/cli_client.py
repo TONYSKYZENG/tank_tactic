@@ -182,6 +182,17 @@ Examples:
                 print("❌ Usage: guard <unit_ids> <target_friendly_id>")
                 return True
             payload = {"action": "api.command_set_guard", "unit_ids": args[0], "target_id": args[1]}
+        elif cmd in ("fire", "command_fire"):
+            unit_ids = args[0] if len(args) > 0 else "*"
+            direction = args[1] if len(args) > 1 else None
+            payload = {"action": "api.command_fire", "unit_ids": unit_ids}
+            if direction:
+                payload["direction"] = direction
+        elif cmd in ("path", "find_path"):
+            if len(args) < 3:
+                print("❌ Usage: path <unit_id> <x> <y>")
+                return True
+            payload = {"action": "api.find_path", "unit_id": args[0], "x": float(args[1]), "y": float(args[2])}
         elif cmd == "raw":
             raw_str = " ".join(args)
             try:

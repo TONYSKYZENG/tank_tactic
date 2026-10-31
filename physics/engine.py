@@ -22,9 +22,12 @@ class PhysicsEngine:
     @property
     def player_tank(self) -> Optional[Tank]:
         for t in self.player_tanks:
+            if t.alive and not t.is_tower:
+                return t
+        for t in self.player_tanks:
             if t.alive:
                 return t
-        return self.player_tanks[0] if self.player_tanks else None
+        return None
 
     def set_player_tank(self, tank: Tank) -> None:
         self.player_tanks = [tank]
@@ -165,7 +168,8 @@ class PhysicsEngine:
             return False
 
         tile_size = self.game_map.tile_size
-        tank_rect = Rect(new_x, new_y, moving_tank.size, moving_tank.size)
+        # 使用 0.5 像素轻微内缩检测障碍瓦片，消除在标准宽度通道内微小浮点误差导致的贴墙刮蹭阻死
+        tank_rect = Rect(new_x + 0.5, new_y + 0.5, moving_tank.size - 1.0, moving_tank.size - 1.0)
 
         col_start = max(0, int(new_x // tile_size))
         col_end = min(self.game_map.cols - 1, int((new_x + moving_tank.size - 0.01) // tile_size))
@@ -180,52 +184,61 @@ class PhysicsEngine:
                     if tank_rect.collides_with(tile_rect):
                         return False
 
+        exact_tank_rect = Rect(new_x, new_y, moving_tank.size, moving_tank.size)
         for other in self.get_all_active_tanks():
             if other is not moving_tank and other.alive:
-                if tank_rect.collides_with(other.rect):
+                if exact_tank_rect.collides_with(other.rect):
                     return False
 
         return True
 
     def find_nearest_free_position(self, start_x: float, start_y: float, size: int) -> Tuple[float, float]:
-        dummy_tank = Tank(start_x, start_y, size=size)
-        if self.can_move_to(dummy_tank, start_x, start_y):
-            return start_x, start_y
-
         tile_size = self.game_map.tile_size
+        aligned_start_x = round(start_x / tile_size) * tile_size
+        aligned_start_y = round(start_y / tile_size) * tile_size
+        dummy_tank = Tank(aligned_start_x, aligned_start_y, size=size)
+        if self.can_move_to(dummy_tank, aligned_start_x, aligned_start_y):
+            return aligned_start_x, aligned_start_y
+
         for radius in range(1, max(self.game_map.cols, self.game_map.rows)):
             for r in range(-radius, radius + 1):
                 for c in range(-radius, radius + 1):
-                    test_x = start_x + c * tile_size
-                    test_y = start_y + r * tile_size
+                    test_x = aligned_start_x + c * tile_size
+                    test_y = aligned_start_y + r * tile_size
                     if self.can_move_to(dummy_tank, test_x, test_y):
                         return test_x, test_y
 
-        return start_x, start_y
+        return aligned_start_x, aligned_start_y
 
     def move_tank(self, tank: Tank, direction: Direction) -> bool:
         if not tank.alive or tank.is_tower or tank.speed <= 0:
             return False
 
         tile_size = self.game_map.tile_size
-        is_turning = (tank.direction != direction)
         tank.direction = direction
 
         curr_x, curr_y = tank.x, tank.y
-        if is_turning:
-            align_threshold = tile_size * 0.45
-            if direction in (Direction.UP, Direction.DOWN):
-                nearest_col = round(curr_x / tile_size)
-                target_x = nearest_col * tile_size
-                if abs(curr_x - target_x) <= align_threshold:
-                    if self.can_move_to(tank, target_x, curr_y):
-                        curr_x = target_x
-            elif direction in (Direction.LEFT, Direction.RIGHT):
-                nearest_row = round(curr_y / tile_size)
-                target_y = nearest_row * tile_size
-                if abs(curr_y - target_y) <= align_threshold:
-                    if self.can_move_to(tank, curr_x, target_y):
-                        curr_y = target_y
+        align_threshold = tile_size * 0.45
+
+        # 连续通道中心线对齐：沿主方向移动时，自动将垂直轴向平滑吸附到通道中心，彻底避免刮蹭砖块卡死
+        if direction in (Direction.UP, Direction.DOWN):
+            nearest_col = round(curr_x / tile_size)
+            target_x = nearest_col * tile_size
+            diff_x = abs(curr_x - target_x)
+            if diff_x <= align_threshold:
+                step_x = min(tank.speed, diff_x)
+                cand_x = curr_x + (step_x if target_x > curr_x else -step_x) if diff_x > 0.05 else target_x
+                if self.can_move_to(tank, cand_x, curr_y):
+                    curr_x = cand_x
+        elif direction in (Direction.LEFT, Direction.RIGHT):
+            nearest_row = round(curr_y / tile_size)
+            target_y = nearest_row * tile_size
+            diff_y = abs(curr_y - target_y)
+            if diff_y <= align_threshold:
+                step_y = min(tank.speed, diff_y)
+                cand_y = curr_y + (step_y if target_y > curr_y else -step_y) if diff_y > 0.05 else target_y
+                if self.can_move_to(tank, curr_x, cand_y):
+                    curr_y = cand_y
 
         new_x = curr_x + direction.dx * tank.speed
         new_y = curr_y + direction.dy * tank.speed

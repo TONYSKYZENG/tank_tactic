@@ -462,7 +462,46 @@ python3 tests/cli_client.py --cmd "move player_alpha 200 300"
 | `tactic <ids> <mode>` | Set combat tactic (`aggressive`, `defensive`, etc.) |
 | `guard <ids> <ally_id>` | Assign bodyguard escort orders |
 | `terminate` | Terminate engine process |
+| `fire <ids> [direction]` | Order batch cannon fire |
+| `path <id> <x> <y>` | Plan optimal A* path & query ammo breach cost |
 | `raw <json>` | Send custom arbitrary JSON payload |
+
+---
+
+## 🧭 Intelligent A* Pathfinding & Ammo-Optimized Obstacle Breaching
+
+The engine features a dual-mode A* pathfinding algorithm ([`GridPathfinder`](file:///Users/xianzhizeng/Documents/projects/tanks_tactic/command/pathfinder.py)):
+- **Infinite Ammo Mode (`tank.ammo < 0` or unlimited ammo enabled)**:
+  - **Auto-Breaching (自动破障)**: Incurs minimal obstacle breach penalty (`0.8`), actively blasting straight through destructible brick barriers instead of undertaking lengthy detours.
+- **Limited Ammo Mode (`tank.ammo >= 0` and limited ammo enabled)**:
+  - **Ammo-Optimized Route (最省弹药破障)**: Imposes a heavy ammo penalty (`100.0`), automatically discovering zero-ammo bypasses around obstacles; if a passage is completely sealed, it computes the mathematically optimal path that breaches the absolute minimum number of brick barriers.
+- **API Access**: Accessible via `api.find_path(x, y)` in `TankScriptAPI` or `api.find_path` over WebSocket/TCP/UDP.
+
+---
+
+## 🐍 Tactical Python AI Scripts (`ai_python/`)
+
+The engine provides an autonomous tactical script execution layer in `ai_python/`:
+- **Threaded Execution**: Each autonomous unit (enemies and uncontrollable friendly units) executes its configured Python script (`ai_script` in mission JSON) within its own dedicated background `threading.Thread`.
+- **API Layer Translation**: Scripts interact with the game engine exclusively via `TankScriptAPI` (`ai_python/bridge.py`), which translates Python method invocations (`move`, `attack`, `fire`, `set_guard`, `report`, `get_opponents`, `get_allies`) into standard JSON API requests dispatched to `GameAPIController.handle_request()`.
+- **Omniscient Intelligence**: Tactical scripts are omniscient by default (`god_mode=True`), possessing full situational awareness of all units and terrain without fog-of-war restrictions.
+- **Friendly Controllability**: Friendly units can be designated as non-controllable (`controllable: false`). Non-controllable units cannot be selected or micro-manipulated in the GUI and execute autonomous tactical scripts (e.g. `ai_python/ally_escort.py`).
+
+### Example Tactical Python Script (`ai_python/boss_hunter.py`):
+```python
+import math
+
+def run(api):
+    while not api.should_stop():
+        me = api.get_status()
+        opponents = api.get_opponents()
+        if opponents:
+            # Omniscient target selection: prioritize defense towers or lowest HP
+            target = min(opponents, key=lambda o: o.get("hp", 1))
+            api.attack(target["id"])
+            api.fire()
+        api.sleep(0.3)
+```
 
 ---
 

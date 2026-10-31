@@ -24,7 +24,9 @@ class MissionLoader:
             spawn=SpawnPoint(x=player_spawn["x"], y=player_spawn["y"]),
             vision_size=float(player_data.get("vision_size", 288.0)),
             ammo=int(player_data.get("ammo", -1)),
-            visibility=float(player_data.get("visibility", 1.0))
+            visibility=float(player_data.get("visibility", 1.0)),
+            controllable=bool(player_data.get("controllable", True)),
+            ai_script=player_data.get("ai_script", None)
         )
 
         # 2. 我方多车编队列表 player_units
@@ -38,12 +40,14 @@ class MissionLoader:
                     spawn=SpawnPoint(x=pspawn["x"], y=pspawn["y"]),
                     vision_size=float(p.get("vision_size", 288.0)),
                     ammo=int(p.get("ammo", -1)),
-                    visibility=float(p.get("visibility", 1.0))
+                    visibility=float(p.get("visibility", 1.0)),
+                    controllable=bool(p.get("controllable", True)),
+                    ai_script=p.get("ai_script", None)
                 ))
         else:
             player_units = [single_player_info]
 
-        # 3. 敌军列表 (含视线、弹药与辨识度 visibility)
+        # 3. 敌军列表 (含视线、弹药、辨识度与外挂战术脚本)
         enemies_info = []
         for e in data.get("enemies", []):
             espawn = e.get("spawn", {"x": 0, "y": 0})
@@ -54,7 +58,9 @@ class MissionLoader:
                 tactic=e.get("tactic", "patrol"),
                 vision_size=float(e.get("vision_size", 250.0)),
                 ammo=int(e.get("ammo", -1)),
-                visibility=float(e.get("visibility", 1.0))
+                visibility=float(e.get("visibility", 1.0)),
+                controllable=bool(e.get("controllable", False)),
+                ai_script=e.get("ai_script", None)
             ))
 
         return Mission(

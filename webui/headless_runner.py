@@ -22,6 +22,8 @@ from conditions import (
     OrCondition,
     UnitDestroyedCondition
 )
+from ai_python.manager import AIScriptManager
+from api.controller import GameAPIController
 
 class HeadlessGameRunner(QObject):
     """
@@ -51,6 +53,10 @@ class HeadlessGameRunner(QObject):
         self.selection_mgr = SelectionManager()
         self.command_dispatcher = CommandDispatcher()
 
+        # 初始化 API 控制器与外挂战术脚本管理器
+        self.api_controller = GameAPIController(self)
+        self.ai_script_manager = AIScriptManager()
+
         self.active_keys: Set[str] = set()
 
         self.preview_box: Optional[Tuple[float, float, float, float]] = None
@@ -61,6 +67,11 @@ class HeadlessGameRunner(QObject):
         self.is_paused = False
 
         self._setup_mission_entities()
+
+        # 启动战术脚本线程
+        all_tanks = self.physics_engine.player_tanks + self.physics_engine.enemy_tanks
+        self.ai_script_manager.start_scripts(all_tanks, self.api_controller, self.base_dir)
+
         self._setup_conditions()
 
         if self.physics_engine.player_tanks:
@@ -71,9 +82,13 @@ class HeadlessGameRunner(QObject):
 
     def pause(self):
         self.is_paused = True
+        if hasattr(self, "ai_script_manager"):
+            self.ai_script_manager.pause()
 
     def resume(self):
         self.is_paused = False
+        if hasattr(self, "ai_script_manager"):
+            self.ai_script_manager.resume()
 
     def _setup_conditions(self):
         self.condition_ctx = ConditionContext(self.physics_engine, self.game_map)
@@ -96,6 +111,8 @@ class HeadlessGameRunner(QObject):
         self.timer.start(16)
 
     def stop(self):
+        if hasattr(self, "ai_script_manager"):
+            self.ai_script_manager.stop_all()
         self.timer.stop()
 
     def _setup_mission_entities(self):
@@ -127,7 +144,9 @@ class HeadlessGameRunner(QObject):
                 tower_type=cfg.tower_type,
                 resupply_radius=cfg.resupply_radius,
                 resupply_interval=cfg.resupply_interval,
-                unit_type=cfg.name
+                unit_type=cfg.name,
+                controllable=getattr(p_info, "controllable", True),
+                ai_script=getattr(p_info, "ai_script", None)
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -159,7 +178,9 @@ class HeadlessGameRunner(QObject):
                 tower_type=cfg.tower_type,
                 resupply_radius=cfg.resupply_radius,
                 resupply_interval=cfg.resupply_interval,
-                unit_type=cfg.name
+                unit_type=cfg.name,
+                controllable=getattr(enemy_info, "controllable", False),
+                ai_script=getattr(enemy_info, "ai_script", None)
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -298,6 +319,9 @@ class HeadlessGameRunner(QObject):
         return False
 
     def restart(self):
+        if hasattr(self, "ai_script_manager"):
+            self.ai_script_manager.stop_all()
+
         self.game_over = False
         self.game_victory = False
         self.active_keys.clear()
@@ -313,6 +337,11 @@ class HeadlessGameRunner(QObject):
         self.command_dispatcher = CommandDispatcher()
         self._setup_mission_entities()
         self._setup_conditions()
+
+        if hasattr(self, "ai_script_manager") and hasattr(self, "api_controller"):
+            all_tanks = self.physics_engine.player_tanks + self.physics_engine.enemy_tanks
+            self.ai_script_manager.start_scripts(all_tanks, self.api_controller, self.base_dir)
+
         if self.physics_engine.player_tanks:
             self.selection_mgr.select_single(self.physics_engine.player_tanks[0])
 
@@ -423,6 +452,11 @@ class HeadlessGameRunner(QObject):
             painter.setPen(QPen(QColor("#2ECC71")))
             painter.setFont(QFont("Courier New", 20, QFont.Bold))
             painter.drawText(self.render_image.rect(), Qt.AlignCenter, f"VICTORY!\n[{self.victory_condition.get_description()}]\n[按 R 重新挑战]")
+        elif self.is_paused:
+            painter.fillRect(self.render_image.rect(), QColor(0, 0, 0, 110))
+            painter.setPen(QPen(QColor("#F1C40F")))
+            painter.setFont(QFont("Courier New", 22, QFont.Bold))
+            painter.drawText(self.render_image.rect(), Qt.AlignCenter, "PAUSED\n(全部单位与高阶 AI 已冻结)")
 
         painter.end()
 

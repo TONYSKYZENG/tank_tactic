@@ -90,7 +90,8 @@ class Tank:
                  vision_size: float = -1.0, ammo: int = -1, visibility: float = 1.0,
                  is_tower: bool = False, can_attack: bool = True, tower_type: str = "general",
                  resupply_radius: float = 0.0, resupply_interval: int = 30,
-                 unit_type: str = "tank"):
+                 unit_type: str = "tank", controllable: bool = True,
+                 ai_script: Optional[str] = None):
         self.id = tank_id
         self.unit_type = unit_type
         self.x = x
@@ -105,6 +106,10 @@ class Tank:
         self.health = health
         self.max_health = health
         self.alive = True
+
+        # ===== 玩家控制与 AI 脚本机制 =====
+        self.controllable = controllable
+        self.ai_script = ai_script
 
         # ===== 视线、弹药与辨识度系统 =====
         self.vision_size = vision_size

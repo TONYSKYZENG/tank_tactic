@@ -59,17 +59,49 @@ class CommandDispatcher:
             clear_path = self.is_auto_clear_path(tank)
             self.tank_commands[tank.id] = MoveCommand(dest_x=sx, dest_y=sy, auto_clear_path=clear_path)
 
-    def issue_attack_target(self, tanks: List[Tank], target_tank: Tank, physics_engine=None):
+    def issue_attack_target(self, tanks: List[Tank], target_tank: Tank, physics_engine=None, ignore_vision: bool = False):
         if not target_tank.alive:
             return
-        if physics_engine and not physics_engine.is_enemy_visible(target_tank):
+        is_omniscient = ignore_vision or any(getattr(t, "ai_script", None) for t in tanks)
+        if physics_engine and not is_omniscient and not physics_engine.is_enemy_visible(target_tank):
             self.issue_move(tanks, target_tank.x, target_tank.y)
             return
 
         for tank in tanks:
             if tank.alive:
                 clear_path = self.is_auto_clear_path(tank)
+                curr_cmd = self.tank_commands.get(tank.id)
+                # 若已在追击该相同存活目标，保持现有寻路与行军子命令，避免高频打断抽搐
+                if isinstance(curr_cmd, AttackTargetCommand) and curr_cmd.target_tank == target_tank and target_tank.alive:
+                    continue
                 self.tank_commands[tank.id] = AttackTargetCommand(target_tank, auto_clear_path=clear_path)
+
+    def _auto_acquire_next_target(self, tank: Tank, physics_engine) -> None:
+        """当当前目标被歼灭后，自动为战斗/战术单位接续锁定下一个高威胁目标，确保连续作战不发呆"""
+        if not tank.alive or tank.is_tower:
+            return
+
+        clear_path = self.is_auto_clear_path(tank)
+        tactic = self.tank_tactics.get(tank.id, TacticMode.MANUAL_OR_IDLE)
+        has_script = getattr(tank, "ai_script", None) is not None
+
+        if tank.camp == Camp.ENEMY or has_script:
+            opp_list = physics_engine.player_tanks if tank.camp == Camp.ENEMY else physics_engine.enemy_tanks
+            alive_opps = [t for t in opp_list if t.alive]
+            if alive_opps:
+                best_target = min(
+                    alive_opps,
+                    key=lambda t: (0 if t.is_tower else 1, (t.x - tank.x)**2 + (t.y - tank.y)**2)
+                )
+                self.tank_commands[tank.id] = AttackTargetCommand(best_target, auto_clear_path=clear_path)
+        elif tactic == TacticMode.AGGRESSIVE:
+            visible_enemies = physics_engine.get_visible_enemies()
+            if visible_enemies:
+                nearest_enemy = min(
+                    visible_enemies,
+                    key=lambda e: (e.x - tank.x)**2 + (e.y - tank.y)**2
+                )
+                self.tank_commands[tank.id] = AttackTargetCommand(nearest_enemy, auto_clear_path=clear_path)
 
     def issue_guard_unit(self, tanks: List[Tank], target_to_guard: Tank):
         """批量下发：跟踪并保卫特定己方单位"""
@@ -99,7 +131,11 @@ class CommandDispatcher:
 
     def update(self, player_tanks: List[Tank], micro_tank: Optional[Tank],
                has_manual_input: bool, physics_engine, game_map: GameMap):
-        alive_tanks = [t for t in player_tanks if t.alive]
+        alive_player_tanks = [t for t in player_tanks if t.alive]
+        # 兼容独立战术脚本驱动的敌军坦克或其他已被下发指令的活动单位
+        enemy_cmd_tanks = [t for t in getattr(physics_engine, "enemy_tanks", [])
+                           if t.alive and (self.tank_commands.get(t.id) is not None or self.tank_tactics.get(t.id))]
+        alive_tanks = alive_player_tanks + [t for t in enemy_cmd_tanks if t not in alive_player_tanks]
         visible_enemies = physics_engine.get_visible_enemies()
 
         # 核心防御塔（若有）
@@ -135,14 +171,21 @@ class CommandDispatcher:
             cmd = self.tank_commands.get(tank.id)
             if cmd is not None:
                 if isinstance(cmd, AttackTargetCommand):
-                    if not physics_engine.is_enemy_visible(cmd.target_tank):
-                        self.tank_commands[tank.id] = None
-                        cmd = None
+                    # 若目标已阵亡，由 cmd.execute() 判定为 finished 并触发自动接续转火
+                    if not cmd.target_tank.alive:
+                        pass
+                    # 若为我方受限迷雾视野普通单位且目标失联，则取消追踪
+                    elif tank.camp == Camp.PLAYER and getattr(tank, "ai_script", None) is None:
+                        if not physics_engine.is_enemy_visible(cmd.target_tank):
+                            self.tank_commands[tank.id] = None
+                            cmd = None
 
                 if cmd is not None:
                     finished = cmd.execute(tank, physics_engine, game_map)
                     if finished:
                         self.tank_commands[tank.id] = None
+                        cmd = None
+                        self._auto_acquire_next_target(tank, physics_engine)
                     continue
 
             tactic = self.tank_tactics.get(tank.id, TacticMode.MANUAL_OR_IDLE)

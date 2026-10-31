@@ -43,6 +43,10 @@ class EnemyAIController:
             if not tank.alive:
                 continue
 
+            # 若敌军配置了独立战术 Python 脚本 (ai_script)，由脚本线程控制，跳过默认 tactic 决策
+            if getattr(tank, "ai_script", None):
+                continue
+
             # 战术决策
             move_dir, should_fire = agent.tactic.decide(tank, self.physics_engine, self.game_map)
 

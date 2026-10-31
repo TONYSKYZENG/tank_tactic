@@ -68,6 +68,8 @@ class GameAPIController:
             return self.pause(params)
         elif action == "resume":
             return self.resume(params)
+        elif action in ("is_paused", "paused"):
+            return self.is_paused(params)
 
         # 2. 判断胜利条件
         elif action in ("is_success", "is_victory", "success"):
@@ -94,14 +96,22 @@ class GameAPIController:
             return self.command_move(params)
         elif action in ("command_attack", "attack"):
             return self.command_attack(params)
+        elif action in ("command_fire", "fire"):
+            return self.command_fire(params)
         elif action in ("command_set_tactic", "set_tactic", "tactic"):
             return self.command_set_tactic(params)
         elif action in ("command_set_guard", "set_guard", "guard"):
             return self.command_set_guard(params)
 
-        # 6. 查询单位完整属性报告
+        # 6. 查询单位完整属性报告与全知情报
         elif action in ("report", "unit_report", "get_status"):
             return self.report(params)
+        elif action in ("list_opponents", "opponents", "get_opponents"):
+            return self.list_opponents(params)
+        elif action in ("list_allies", "allies", "get_allies"):
+            return self.list_allies(params)
+        elif action in ("find_path", "path"):
+            return self.find_path(params)
 
         # 辅助探针
         elif action in ("ping", "hello"):
@@ -115,20 +125,35 @@ class GameAPIController:
     # ================= 1. api.pause() / api.resume() =================
 
     def pause(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """暂停引擎运行"""
+        """暂停引擎运行，同时全量冻结所有高级 AI 战术脚本线程"""
         if hasattr(self.game_context, "pause"):
             self.game_context.pause()
         elif hasattr(self.game_context, "is_paused"):
             self.game_context.is_paused = True
-        return {"status": "ok", "paused": True, "message": "Engine paused"}
+
+        mgr = getattr(self.game_context, "ai_script_manager", None)
+        if mgr and hasattr(mgr, "pause"):
+            mgr.pause()
+
+        return {"status": "ok", "paused": True, "message": "Engine and all AI scripts paused"}
 
     def resume(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """恢复引擎运行"""
+        """恢复引擎运行，同时全量解冻所有高级 AI 战术脚本线程"""
         if hasattr(self.game_context, "resume"):
             self.game_context.resume()
         elif hasattr(self.game_context, "is_paused"):
             self.game_context.is_paused = False
-        return {"status": "ok", "paused": False, "message": "Engine resumed"}
+
+        mgr = getattr(self.game_context, "ai_script_manager", None)
+        if mgr and hasattr(mgr, "resume"):
+            mgr.resume()
+
+        return {"status": "ok", "paused": False, "message": "Engine and all AI scripts resumed"}
+
+    def is_paused(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """查询引擎当前是否处于暂停状态"""
+        is_p = bool(getattr(self.game_context, "is_paused", False))
+        return {"status": "ok", "paused": is_p}
 
     # ================= 2. api.is_success() =================
 
@@ -176,18 +201,19 @@ class GameAPIController:
     def list_current_unit_id(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         返回当前还存活的所有己方单位 ID，以逗号隔开。
-        并对己方单位启用辨识度 visibility，对部分存活单位有概率 list 不到。
+        并对己方单位启用辨识度 visibility，对部分存活单位有概率 list 不到（god_mode=True 时无视概率直接全知列出）。
         """
         physics = getattr(self.game_context, "physics_engine", None)
         if not physics:
             return {"status": "error", "error": "Physics engine not available"}
 
+        god_mode = bool(params.get("god_mode", False) or params.get("all", False))
         visible_ids = []
         for tank in physics.player_tanks:
             if tank.alive:
                 vis = getattr(tank, "visibility", 1.0)
-                # 辨识度判定：1.0 必能被列出；0.0~1.0 按概率列出
-                if vis >= 1.0 or random.random() < vis:
+                # 辨识度判定：god_mode 或 1.0 必能被列出；0.0~1.0 按概率列出
+                if god_mode or vis >= 1.0 or random.random() < vis:
                     visible_ids.append(tank.id)
 
         unit_ids_str = ",".join(visible_ids)
@@ -315,12 +341,14 @@ class GameAPIController:
 
     # ================= 5. api.command_* 批量指令 =================
 
-    def _get_target_player_tanks(self, unit_ids_param: Any) -> List[Any]:
+    def _get_target_tanks(self, unit_ids_param: Any) -> List[Any]:
         physics = getattr(self.game_context, "physics_engine", None)
         if not physics:
             return []
 
         all_player_tanks = [t for t in physics.player_tanks if t.alive]
+        all_enemy_tanks = [t for t in physics.enemy_tanks if t.alive]
+        all_tanks = all_player_tanks + all_enemy_tanks
 
         if not unit_ids_param:
             return all_player_tanks
@@ -336,17 +364,29 @@ class GameAPIController:
             return all_player_tanks
 
         target_set = set(ids)
-        return [t for t in all_player_tanks if t.id in target_set]
+        matched = [t for t in all_tanks if t.id in target_set]
+
+        # 若调度器中未注册该坦克，自动注册
+        dispatcher = getattr(self.game_context, "command_dispatcher", None)
+        if dispatcher:
+            for t in matched:
+                if t.id not in dispatcher.tank_commands:
+                    dispatcher.register_tank(t)
+
+        return matched
+
+    # 保持向后兼容
+    _get_target_player_tanks = _get_target_tanks
 
     def command_move(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """按照 ID 批量移动己方单位到 (x, y)"""
+        """按照 ID 批量移动单位到 (x, y)"""
         dispatcher = getattr(self.game_context, "command_dispatcher", None)
         if not dispatcher:
             return {"status": "error", "error": "Command dispatcher not available"}
 
-        tanks = self._get_target_player_tanks(params.get("unit_ids"))
+        tanks = self._get_target_tanks(params.get("unit_ids"))
         if not tanks:
-            return {"status": "error", "error": "No matching alive player units found"}
+            return {"status": "error", "error": "No matching alive units found"}
 
         try:
             x = float(params.get("x", 0.0))
@@ -370,53 +410,95 @@ class GameAPIController:
         if not dispatcher or not physics:
             return {"status": "error", "error": "Engine or dispatcher not available"}
 
-        tanks = self._get_target_player_tanks(params.get("unit_ids"))
+        tanks = self._get_target_tanks(params.get("unit_ids"))
         if not tanks:
-            return {"status": "error", "error": "No matching alive player units found"}
+            return {"status": "error", "error": "No matching alive units found"}
 
         target_id = params.get("target_id")
-        target_enemy = None
+        target_tank = None
+        all_active = physics.player_tanks + physics.enemy_tanks
         if target_id:
-            for e in physics.enemy_tanks:
-                if e.id == target_id and e.alive:
-                    target_enemy = e
+            for t in all_active:
+                if t.id == target_id and t.alive:
+                    target_tank = t
                     break
 
-        if not target_enemy:
-            # 若提供了坐标 (x, y)，寻找该坐标附近的敌军
+        if not target_tank:
+            # 若提供了坐标 (x, y)，寻找该坐标附近的单位
             if "x" in params and "y" in params:
                 tx = float(params["x"])
                 ty = float(params["y"])
-                for e in physics.enemy_tanks:
-                    if e.alive and abs(e.x - tx) < 40 and abs(e.y - ty) < 40:
-                        target_enemy = e
+                for t in all_active:
+                    if t.alive and abs(t.x - tx) < 40 and abs(t.y - ty) < 40:
+                        target_tank = t
                         break
 
-        if not target_enemy:
-            return {"status": "error", "error": f"Target enemy '{target_id}' not found or destroyed"}
+        if not target_tank:
+            return {"status": "error", "error": f"Target unit '{target_id}' not found or destroyed"}
 
-        dispatcher.issue_attack_target(tanks, target_enemy, physics)
+        god_mode = bool(params.get("god_mode", False) or params.get("ignore_vision", False))
+        dispatcher.issue_attack_target(tanks, target_tank, physics, ignore_vision=god_mode)
         return {
             "status": "ok",
             "command": "command_attack",
-            "target_id": target_enemy.id,
+            "target_id": target_tank.id,
             "affected_units": [t.id for t in tanks],
             "count": len(tanks)
         }
 
+    def command_fire(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """按照 ID 批量让坦克向指定或当前朝向开火"""
+        if getattr(self.game_context, "is_paused", False):
+            return {"status": "error", "error": "Cannot fire while engine is paused"}
+
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        from physics.entities import Direction, Camp
+        tanks = self._get_target_tanks(params.get("unit_ids"))
+        if not tanks:
+            return {"status": "error", "error": "No matching alive units found"}
+
+        fired_units = []
+        dir_str = params.get("direction")
+        for tank in tanks:
+            if not tank.alive:
+                continue
+            if dir_str:
+                d_name = str(dir_str).upper()
+                if hasattr(Direction, d_name):
+                    tank.direction = getattr(Direction, d_name)
+
+            if tank.can_fire(physics.limited_ammo_enabled):
+                cfg = getattr(tank, "_config", None)
+                b_speed = cfg.bullet_speed if cfg else 6.0
+                b_size = cfg.bullet_size if cfg else 12
+                b_color = cfg.bullet_color if cfg else ("#E69C24" if tank.camp == Camp.PLAYER else "#E63946")
+                physics.spawn_bullet(tank, b_speed, b_size, b_color)
+                fired_units.append(tank.id)
+
+        return {
+            "status": "ok",
+            "command": "command_fire",
+            "fired_units": fired_units,
+            "count": len(fired_units)
+        }
+
     def command_set_tactic(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """按照 ID 批量设置己方单位的战术"""
+        """按照 ID 批量设置单位的战术姿态"""
         dispatcher = getattr(self.game_context, "command_dispatcher", None)
         physics = getattr(self.game_context, "physics_engine", None)
         if not dispatcher or not physics:
             return {"status": "error", "error": "Engine or dispatcher not available"}
 
-        tanks = self._get_target_player_tanks(params.get("unit_ids"))
+        tanks = self._get_target_tanks(params.get("unit_ids"))
         if not tanks:
-            return {"status": "error", "error": "No matching alive player units found"}
+            return {"status": "error", "error": "No matching alive units found"}
 
         tactic_str = str(params.get("tactic", "aggressive")).lower().strip()
         guard_target = None
+        all_active = physics.player_tanks + physics.enemy_tanks
 
         if tactic_str in ("aggressive", "attack", "1"):
             tactic_mode = TacticMode.AGGRESSIVE
@@ -426,7 +508,7 @@ class GameAPIController:
             tactic_mode = TacticMode.GUARD_UNIT
             gt_id = params.get("guard_target_id")
             if gt_id:
-                for ally in physics.player_tanks:
+                for ally in all_active:
                     if ally.id == gt_id and ally.alive:
                         guard_target = ally
                         break
@@ -446,20 +528,21 @@ class GameAPIController:
         }
 
     def command_set_guard(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """按照 ID 批量让己方单位去跟踪并保卫特定己方单位"""
+        """按照 ID 批量让单位去跟踪并保卫特定单位"""
         dispatcher = getattr(self.game_context, "command_dispatcher", None)
         physics = getattr(self.game_context, "physics_engine", None)
         if not dispatcher or not physics:
             return {"status": "error", "error": "Engine or dispatcher not available"}
 
-        tanks = self._get_target_player_tanks(params.get("unit_ids"))
+        tanks = self._get_target_tanks(params.get("unit_ids"))
         if not tanks:
-            return {"status": "error", "error": "No matching alive player units found"}
+            return {"status": "error", "error": "No matching alive units found"}
 
+        all_active = physics.player_tanks + physics.enemy_tanks
         target_id = params.get("target_id") or params.get("guard_target_id")
         guard_target = None
         if target_id:
-            for ally in physics.player_tanks:
+            for ally in all_active:
                 if ally.id == target_id and ally.alive:
                     guard_target = ally
                     break
@@ -483,10 +566,10 @@ class GameAPIController:
             "count": len(tanks)
         }
 
-    # ================= 6. api.report =================
+    # ================= 6. api.report / 全知情报 =================
 
     def report(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """让特定 ID 的己方单位报告所有属性（战术、弹药、速度、HP 等）"""
+        """报告特定 ID 单位的详细属性（战术、弹药、速度、HP、位置等）"""
         physics = getattr(self.game_context, "physics_engine", None)
         dispatcher = getattr(self.game_context, "command_dispatcher", None)
         if not physics:
@@ -497,19 +580,20 @@ class GameAPIController:
             return {"status": "error", "error": "Missing 'unit_id' parameter"}
 
         target_tank = None
-        for t in physics.player_tanks:
+        for t in physics.player_tanks + physics.enemy_tanks:
             if t.id == unit_id:
                 target_tank = t
                 break
 
         if not target_tank:
-            return {"status": "error", "error": f"Player unit with ID '{unit_id}' not found"}
+            return {"status": "error", "error": f"Unit with ID '{unit_id}' not found"}
 
         tactic = dispatcher.get_tactic(target_tank) if dispatcher else None
         auto_clr = dispatcher.is_auto_clear_path(target_tank) if dispatcher else False
 
         report_data = {
             "id": target_tank.id,
+            "camp": target_tank.camp.value,
             "alive": target_tank.alive,
             "tactic": tactic.value if tactic else "manual",
             "ammo": target_tank.ammo,
@@ -519,16 +603,134 @@ class GameAPIController:
             "max_hp": target_tank.max_health,
             "x": round(target_tank.x, 2),
             "y": round(target_tank.y, 2),
+            "size": target_tank.size,
             "direction": target_tank.direction.name,
             "visibility": getattr(target_tank, "visibility", 1.0),
             "vision_size": target_tank.vision_size,
             "is_tower": target_tank.is_tower,
             "tower_type": target_tank.tower_type,
             "resupply_radius": target_tank.resupply_radius,
-            "auto_clear": auto_clr
+            "auto_clear": auto_clr,
+            "controllable": getattr(target_tank, "controllable", True),
+            "ai_script": getattr(target_tank, "ai_script", None)
         }
 
         return {
             "status": "ok",
             "report": report_data
+        }
+
+    def list_opponents(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """列出指定单位或阵营的全部敌对存活单位（全知全能上帝视角）"""
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        from physics.entities import Camp
+        unit_id = str(params.get("unit_id") or "").strip()
+        camp = None
+        if unit_id:
+            for t in physics.player_tanks + physics.enemy_tanks:
+                if t.id == unit_id:
+                    camp = t.camp
+                    break
+        if not camp:
+            camp_str = str(params.get("camp", "enemy")).lower()
+            camp = Camp.ENEMY if "enemy" in camp_str else Camp.PLAYER
+
+        opp_tanks = physics.player_tanks if camp == Camp.ENEMY else physics.enemy_tanks
+        units = []
+        for t in opp_tanks:
+            if t.alive:
+                units.append({
+                    "id": t.id,
+                    "camp": t.camp.value,
+                    "x": round(t.x, 2),
+                    "y": round(t.y, 2),
+                    "hp": t.health,
+                    "max_hp": t.max_health,
+                    "unit_type": getattr(t, "unit_type", "tank"),
+                    "is_tower": getattr(t, "is_tower", False),
+                    "tower_type": getattr(t, "tower_type", "general"),
+                    "speed": t.speed
+                })
+
+        return {
+            "status": "ok",
+            "units": units,
+            "unit_ids": ",".join([u["id"] for u in units]),
+            "count": len(units)
+        }
+
+    def list_allies(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """列出指定单位或阵营的全部友方存活单位"""
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        from physics.entities import Camp
+        unit_id = str(params.get("unit_id") or "").strip()
+        camp = None
+        if unit_id:
+            for t in physics.player_tanks + physics.enemy_tanks:
+                if t.id == unit_id:
+                    camp = t.camp
+                    break
+        if not camp:
+            camp_str = str(params.get("camp", "player")).lower()
+            camp = Camp.ENEMY if "enemy" in camp_str else Camp.PLAYER
+
+        ally_tanks = physics.enemy_tanks if camp == Camp.ENEMY else physics.player_tanks
+        units = []
+        for t in ally_tanks:
+            if t.alive and t.id != unit_id:
+                units.append({
+                    "id": t.id,
+                    "camp": t.camp.value,
+                    "x": round(t.x, 2),
+                    "y": round(t.y, 2),
+                    "hp": t.health,
+                    "max_hp": t.max_health,
+                    "unit_type": getattr(t, "unit_type", "tank"),
+                    "is_tower": getattr(t, "is_tower", False),
+                    "tower_type": getattr(t, "tower_type", "general"),
+                    "speed": t.speed
+                })
+
+        return {
+            "status": "ok",
+            "units": units,
+            "unit_ids": ",".join([u["id"] for u in units]),
+            "count": len(units)
+        }
+
+    def find_path(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """计算单位到目标点的最优路径及最省弹药破障数"""
+        physics = getattr(self.game_context, "physics_engine", None)
+        game_map = getattr(self.game_context, "game_map", None)
+        if not physics or not game_map:
+            return {"status": "error", "error": "Game engine or map not available"}
+
+        unit_id = params.get("unit_id")
+        tanks = self._get_target_tanks(unit_id)
+        tank = tanks[0] if tanks else None
+
+        from command.pathfinder import GridPathfinder
+        pf = GridPathfinder(game_map)
+        start_x = tank.x if tank else float(params.get("start_x", 0.0))
+        start_y = tank.y if tank else float(params.get("start_y", 0.0))
+        dest_x = float(params.get("x", params.get("dest_x", 0.0)))
+        dest_y = float(params.get("y", params.get("dest_y", 0.0)))
+
+        path, ammo_needed = pf.find_path(
+            start_x, start_y, dest_x, dest_y,
+            tank=tank,
+            limited_ammo_enabled=physics.limited_ammo_enabled
+        )
+
+        return {
+            "status": "ok",
+            "waypoints": [{"x": px, "y": py} for px, py in path],
+            "ammo_needed": ammo_needed,
+            "step_count": len(path)
         }

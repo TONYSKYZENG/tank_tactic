@@ -63,7 +63,9 @@
       },
       "vision_size": 260,
       "ammo": 20,
-      "visibility": 0.7
+      "visibility": 0.7,
+      "controllable": false,
+      "ai_script": "ai_python/ally_escort.py"
     }
   ],
   "enemies": [
@@ -75,9 +77,10 @@
         "y": 0
       },
       "tactic": "patrol",
-      "vision_size": 250,
+      "vision_size": -1,
       "ammo": 20,
-      "visibility": 1.0
+      "visibility": 1.0,
+      "ai_script": "ai_python/patrol_scout.py"
     },
     {
       "id": "e_fast_1",
@@ -87,9 +90,10 @@
         "y": 0
       },
       "tactic": "charge_base",
-      "vision_size": 220,
+      "vision_size": -1,
       "ammo": 15,
-      "visibility": 0.65
+      "visibility": 0.65,
+      "ai_script": "ai_python/charge_assault.py"
     },
     {
       "id": "e_hunter_1",
@@ -101,7 +105,8 @@
       "tactic": "hunter",
       "vision_size": -1,
       "ammo": -1,
-      "visibility": 0.85
+      "visibility": 0.85,
+      "ai_script": "ai_python/boss_hunter.py"
     }
   ],
   "victory_conditions": {

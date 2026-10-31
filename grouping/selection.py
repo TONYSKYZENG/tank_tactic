@@ -20,8 +20,8 @@ class SelectionManager:
             self.micro_tank = self.selected_tanks[0] if self.selected_tanks else None
 
     def select_single(self, tank: Tank):
-        """单选某一坦克，并将其设为当前微操坦克"""
-        if not tank.alive or tank.camp != Camp.PLAYER:
+        """单选某一坦克，并将其设为当前微操坦克 (仅限可操控单位)"""
+        if not tank.alive or tank.camp != Camp.PLAYER or not getattr(tank, "controllable", True):
             return
         self.selected_tanks = [tank]
         self.micro_tank = tank
@@ -29,11 +29,11 @@ class SelectionManager:
     def select_box(self, box_rect: Rect, player_tanks: List[Tank]):
         """
         帝国时代矩形框选：
-        选中与 box_rect 相交或被其包含的所有存活我方坦克
+        选中与 box_rect 相交或被其包含的所有存活且可操控的我方坦克
         """
         matched = []
         for tank in player_tanks:
-            if tank.alive and tank.camp == Camp.PLAYER:
+            if tank.alive and tank.camp == Camp.PLAYER and getattr(tank, "controllable", True):
                 if box_rect.collides_with(tank.rect):
                     matched.append(tank)
 
@@ -46,8 +46,8 @@ class SelectionManager:
             self.clear_selection()
 
     def select_all(self, player_tanks: List[Tank]):
-        """全选我方所有存活坦克"""
-        self.selected_tanks = [t for t in player_tanks if t.alive and t.camp == Camp.PLAYER]
+        """全选我方所有存活且可操控的坦克"""
+        self.selected_tanks = [t for t in player_tanks if t.alive and t.camp == Camp.PLAYER and getattr(t, "controllable", True)]
         if self.selected_tanks:
             if self.micro_tank not in self.selected_tanks:
                 self.micro_tank = self.selected_tanks[0]
@@ -60,8 +60,8 @@ class SelectionManager:
         self.micro_tank = None
 
     def set_micro_tank(self, tank: Tank):
-        """指定具体的微操坦克"""
-        if tank.alive and tank.camp == Camp.PLAYER:
+        """指定具体的微操坦克 (仅限可操控单位)"""
+        if tank.alive and tank.camp == Camp.PLAYER and getattr(tank, "controllable", True):
             self.micro_tank = tank
             if tank not in self.selected_tanks:
                 self.selected_tanks.append(tank)
@@ -70,10 +70,10 @@ class SelectionManager:
         """
         循环切换当前具体微操的坦克（按 Tab 键触发）：
         - 如果当前有选中的坦克组，在选中的坦克组内循环切换
-        - 如果当前未选中坦克，在我方所有存活坦克中循环切换
+        - 如果当前未选中坦克，在我方所有存活且可操控的坦克中循环切换
         """
         self.clean_dead_tanks()
-        candidates = self.selected_tanks if self.selected_tanks else [t for t in all_player_tanks if t.alive]
+        candidates = self.selected_tanks if self.selected_tanks else [t for t in all_player_tanks if t.alive and getattr(t, "controllable", True)]
 
         if not candidates:
             self.micro_tank = None

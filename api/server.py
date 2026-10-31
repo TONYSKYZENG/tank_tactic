@@ -28,10 +28,15 @@ class APIServerManager(QObject):
         self.udp_port = udp_port
 
         # 核心控制器
-        self.controller = GameAPIController(
-            game_context=self.game_context,
-            termination_handler=termination_handler or self.stop
-        )
+        if hasattr(self.game_context, "api_controller") and self.game_context.api_controller:
+            self.controller = self.game_context.api_controller
+            if termination_handler:
+                self.controller.termination_handler = termination_handler
+        else:
+            self.controller = GameAPIController(
+                game_context=self.game_context,
+                termination_handler=termination_handler or self.stop
+            )
 
         # 三大协议服务器
         self.ws_server = WebSocketAPIServer(self.controller, host=self.host, port=self.ws_port, parent=self)

@@ -21,6 +21,8 @@ from conditions import (
     OrCondition,
     UnitDestroyedCondition
 )
+from ai_python.manager import AIScriptManager
+from api.controller import GameAPIController
 from .renderer import PixelRenderer
 
 class GameCanvasWidget(QWidget):
@@ -59,6 +61,10 @@ class GameCanvasWidget(QWidget):
         self.selection_mgr = SelectionManager()
         self.command_dispatcher = CommandDispatcher()
 
+        # 初始化网络 API 控制器与外挂战术脚本管理器
+        self.api_controller = GameAPIController(self)
+        self.ai_script_manager = AIScriptManager()
+
         # 键盘与鼠标状态
         self.active_keys: Set[int] = set()
         self.is_dragging_box = False
@@ -70,6 +76,10 @@ class GameCanvasWidget(QWidget):
 
         # 初始化玩家与敌军
         self._setup_mission_entities()
+
+        # 启动外挂 Python 战术脚本线程
+        all_tanks = self.physics_engine.player_tanks + self.physics_engine.enemy_tanks
+        self.ai_script_manager.start_scripts(all_tanks, self.api_controller, self.base_dir)
 
         # 初始化胜负判定系统
         self._setup_conditions()
@@ -88,9 +98,13 @@ class GameCanvasWidget(QWidget):
 
     def pause(self):
         self.is_paused = True
+        if hasattr(self, "ai_script_manager"):
+            self.ai_script_manager.pause()
 
     def resume(self):
         self.is_paused = False
+        if hasattr(self, "ai_script_manager"):
+            self.ai_script_manager.resume()
 
     def _setup_conditions(self):
         self.condition_ctx = ConditionContext(self.physics_engine, self.game_map)
@@ -112,6 +126,9 @@ class GameCanvasWidget(QWidget):
             self.defeat_condition = OrCondition(defeat_subs)
 
     def restart(self):
+        if hasattr(self, "ai_script_manager"):
+            self.ai_script_manager.stop_all()
+
         self.game_over = False
         self.game_victory = False
         self.active_keys.clear()
@@ -127,8 +144,23 @@ class GameCanvasWidget(QWidget):
         self.command_dispatcher = CommandDispatcher()
         self._setup_mission_entities()
         self._setup_conditions()
+
+        if hasattr(self, "ai_script_manager") and hasattr(self, "api_controller"):
+            all_tanks = self.physics_engine.player_tanks + self.physics_engine.enemy_tanks
+            self.ai_script_manager.start_scripts(all_tanks, self.api_controller, self.base_dir)
+
         if self.physics_engine.player_tanks:
             self.selection_mgr.select_single(self.physics_engine.player_tanks[0])
+
+    def stop(self):
+        if hasattr(self, "ai_script_manager"):
+            self.ai_script_manager.stop_all()
+        if hasattr(self, "timer") and self.timer.isActive():
+            self.timer.stop()
+
+    def closeEvent(self, event):
+        self.stop()
+        super().closeEvent(event)
 
     def _setup_mission_entities(self):
         tile_size = self.game_map.tile_size
@@ -160,7 +192,9 @@ class GameCanvasWidget(QWidget):
                 tower_type=cfg.tower_type,
                 resupply_radius=cfg.resupply_radius,
                 resupply_interval=cfg.resupply_interval,
-                unit_type=cfg.name
+                unit_type=cfg.name,
+                controllable=getattr(p_info, "controllable", True),
+                ai_script=getattr(p_info, "ai_script", None)
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -193,7 +227,9 @@ class GameCanvasWidget(QWidget):
                 tower_type=cfg.tower_type,
                 resupply_radius=cfg.resupply_radius,
                 resupply_interval=cfg.resupply_interval,
-                unit_type=cfg.name
+                unit_type=cfg.name,
+                controllable=getattr(enemy_info, "controllable", False),
+                ai_script=getattr(enemy_info, "ai_script", None)
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -318,6 +354,11 @@ class GameCanvasWidget(QWidget):
             elif key == Qt.Key_S:
                 selected = self.selection_mgr.get_selected()
                 self.command_dispatcher.issue_stop(selected)
+            elif key == Qt.Key_P:
+                if self.is_paused:
+                    self.resume()
+                else:
+                    self.pause()
             elif key == Qt.Key_R and (self.game_over or self.game_victory):
                 self.restart()
 
@@ -495,7 +536,7 @@ class GameCanvasWidget(QWidget):
                 self.drag_current.x(), self.drag_current.y()
             )
 
-        # 9. 胜负提示
+        # 9. 胜负与暂停提示
         if self.game_over:
             painter.fillRect(self.rect(), QColor(0, 0, 0, 160))
             painter.setPen(QPen(QColor("#E74C3C")))
@@ -506,5 +547,10 @@ class GameCanvasWidget(QWidget):
             painter.setPen(QPen(QColor("#2ECC71")))
             painter.setFont(QFont("Courier New", 20, QFont.Bold))
             painter.drawText(self.rect(), Qt.AlignCenter, f"VICTORY!\n[{self.victory_condition.get_description()}]\n(按 R 键重开)")
+        elif self.is_paused:
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 110))
+            painter.setPen(QPen(QColor("#F1C40F")))
+            painter.setFont(QFont("Courier New", 22, QFont.Bold))
+            painter.drawText(self.rect(), Qt.AlignCenter, "PAUSED\n(全部单位与高阶 AI 已冻结\n按 P 键或 API 恢复)")
 
         painter.end()

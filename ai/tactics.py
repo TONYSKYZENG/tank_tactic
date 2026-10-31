@@ -151,6 +151,12 @@ class ChargeBaseTactic(BaseTactic):
                     target_tower = pt
                     break
 
+        # 防御塔全灭后，转为突击追杀剩余的我方活动战车，确保持续进攻
+        if not target_tower:
+            alive_pts = [t for t in physics_engine.player_tanks if t.alive]
+            if alive_pts:
+                target_tower = min(alive_pts, key=lambda t: (t.x - tank.x)**2 + (t.y - tank.y)**2)
+
         if target_tower:
             base_x = target_tower.x + target_tower.size / 2.0
             base_y = target_tower.y + target_tower.size / 2.0
@@ -219,7 +225,11 @@ class HunterTactic(BaseTactic):
     def decide(self, tank: Tank, physics_engine, game_map: GameMap) -> Tuple[Optional[Direction], bool]:
         player = physics_engine.player_tank
         if not player or not player.alive:
-            return tank.direction, False
+            alive_pts = [t for t in physics_engine.player_tanks if t.alive]
+            if alive_pts:
+                player = min(alive_pts, key=lambda t: (t.x - tank.x)**2 + (t.y - tank.y)**2)
+            else:
+                return tank.direction, False
 
         should_fire = False
         center_x = tank.x + tank.size / 2.0

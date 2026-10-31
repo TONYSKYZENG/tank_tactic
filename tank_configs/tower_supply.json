@@ -1,0 +1,17 @@
+{
+  "name": "Eagle Supply Fortress",
+  "speed": 0.0,
+  "size": 40,
+  "color": "#D4AF37",
+  "track_color": "#7D6608",
+  "bullet_speed": 6.0,
+  "bullet_size": 12,
+  "bullet_color": "#F9E79F",
+  "fire_cooldown": 30,
+  "health": 8,
+  "is_tower": true,
+  "can_attack": true,
+  "tower_type": "supply",
+  "resupply_radius": 130.0,
+  "resupply_interval": 25
+}

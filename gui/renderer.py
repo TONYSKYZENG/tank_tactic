@@ -1,10 +1,11 @@
-from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFont
+from typing import List, Optional
+from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFont, QImage
 from PyQt5.QtCore import QRectF, Qt
 from map_loader.models import GameMap, TileType
-from physics.entities import Tank, Bullet, Direction, Camp
+from physics.entities import Tank, Bullet, Direction, Camp, Rect
 
 class PixelRenderer:
-    """像素风渲染器：使用正方形方块组合渲染品字形坦克、品字形炮弹与地图"""
+    """像素风渲染器：使用正方形方块组合渲染品字形坦克、防御塔、品字形炮弹、地图、RTS 选框与战争迷雾"""
 
     @staticmethod
     def draw_map(painter: QPainter, game_map: GameMap) -> None:
@@ -25,7 +26,6 @@ class PixelRenderer:
 
     @staticmethod
     def _draw_brick_tile(painter: QPainter, x: float, y: float, size: float) -> None:
-        """老式小霸王像素砖墙：红褐色网格方块"""
         painter.fillRect(QRectF(x, y, size, size), QColor("#8B3A1A"))
         pen = QPen(QColor("#2B120A"), 1)
         painter.setPen(pen)
@@ -45,9 +45,7 @@ class PixelRenderer:
 
     @staticmethod
     def _draw_steel_tile(painter: QPainter, x: float, y: float, size: float) -> None:
-        """老式小霸王铁墙：白银色反光金属方块"""
         painter.fillRect(QRectF(x, y, size, size), QColor("#A8A8A8"))
-
         half = size / 2.0
         for dx in (0, half):
             for dy in (0, half):
@@ -63,7 +61,6 @@ class PixelRenderer:
 
     @staticmethod
     def _draw_base_tile(painter: QPainter, x: float, y: float, size: float) -> None:
-        """基地大本营：老鹰/五角星基地"""
         painter.fillRect(QRectF(x, y, size, size), QColor("#111111"))
         margin = size * 0.15
         core_size = size - margin * 2
@@ -72,25 +69,61 @@ class PixelRenderer:
         painter.fillRect(QRectF(x + sub, y + sub, size - sub * 2, size - sub * 2), QColor("#E74C3C"))
 
     @staticmethod
-    def draw_tank(painter: QPainter, tank: Tank) -> None:
+    def draw_tank(painter: QPainter, tank: Tank, is_selected: bool = False,
+                  is_micro: bool = False, auto_clear: bool = False) -> None:
         """
-        绘制由正方形拼成的【品字形】坦克：
-        品字形由 3 个正方形组成：1个朝前的凸起方块（炮塔），2个并排的后方方块（底座履带）
+        绘制机动坦克或防御塔（雷达塔、重炮塔、补给要塞）
         """
         if not tank.alive:
             return
 
         size = tank.size
-        unit = size / 2.0
         x = tank.x
         y = tank.y
 
+        # 如果是防御塔，采用堡垒像素风渲染
+        if tank.is_tower:
+            PixelRenderer._draw_defense_tower(painter, tank, is_selected, is_micro)
+            return
+
+        # ===== 常规机动坦克品字形渲染 =====
+        unit = size / 2.0
         main_color = QColor(tank.color)
         light_color = main_color.lighter(130)
         dark_color = main_color.darker(150)
         border_pen = QPen(QColor("#111111"), 1)
 
-        # 根据朝向计算品字形的3个正方形坐标 (第1个为前尖端炮塔，第2/3个为后底座)
+        # 1. 选中框
+        if is_selected:
+            sel_pen = QPen(QColor("#2ECC71"), 1.5, Qt.DashLine)
+            painter.setPen(sel_pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(QRectF(x - 3, y - 3, size + 6, size + 6))
+
+        # 2. 微操光标
+        if is_micro:
+            micro_pen = QPen(QColor("#F1C40F"), 2)
+            painter.setPen(micro_pen)
+            corner_len = 6
+            painter.drawLine(int(x - 5), int(y - 5), int(x - 5 + corner_len), int(y - 5))
+            painter.drawLine(int(x - 5), int(y - 5), int(x - 5), int(y - 5 + corner_len))
+            painter.drawLine(int(x + size + 5), int(y - 5), int(x + size + 5 - corner_len), int(y - 5))
+            painter.drawLine(int(x + size + 5), int(y - 5), int(x + size + 5), int(y - 5 + corner_len))
+            painter.drawLine(int(x - 5), int(y + size + 5), int(x - 5 + corner_len), int(y + size + 5))
+            painter.drawLine(int(x - 5), int(y + size + 5), int(x - 5), int(y + size + 5 - corner_len))
+            painter.drawLine(int(x + size + 5), int(y + size + 5), int(x + size + 5 - corner_len), int(y + size + 5))
+            painter.drawLine(int(x + size + 5), int(y + size + 5), int(x + size + 5), int(y + size + 5 - corner_len))
+
+            painter.setFont(QFont("Courier New", 8, QFont.Bold))
+            painter.setPen(QPen(QColor("#F1C40F")))
+            tag_text = "▼MICRO [开路]" if auto_clear else "▼MICRO"
+            painter.drawText(QRectF(x - 25, y - 16, size + 50, 12), Qt.AlignCenter, tag_text)
+        elif auto_clear:
+            painter.setFont(QFont("Courier New", 8, QFont.Bold))
+            painter.setPen(QPen(QColor("#E67E22")))
+            painter.drawText(QRectF(x - 10, y - 12, size + 20, 10), Qt.AlignCenter, "[开路]")
+
+        # 3. 品字形方块
         if tank.direction == Direction.UP:
             squares = [
                 (x + unit / 2.0, y),
@@ -118,11 +151,9 @@ class PixelRenderer:
         else:
             squares = [(x, y), (x + unit, y), (x, y + unit)]
 
-        # 逐个绘制拼成“品”字形的正方形方块
         for i, (sx, sy) in enumerate(squares):
             rect = QRectF(sx, sy, unit, unit)
             painter.fillRect(rect, main_color)
-
             painter.setPen(border_pen)
             painter.drawRect(rect)
 
@@ -134,27 +165,131 @@ class PixelRenderer:
             painter.drawLine(int(sx + unit - 2), int(sy + 1), int(sx + unit - 2), int(sy + unit - 2))
             painter.drawLine(int(sx + 1), int(sy + unit - 2), int(sx + unit - 2), int(sy + unit - 2))
 
-            # 炮口方块（在尖端方块中央）
             if i == 0:
                 pad = unit * 0.35
-                painter.fillRect(QRectF(sx + pad, sy + pad, unit - pad * 2, unit - pad * 2), QColor("#000000"))
+                muzzle_color = QColor("#D35400") if auto_clear else QColor("#000000")
+                painter.fillRect(QRectF(sx + pad, sy + pad, unit - pad * 2, unit - pad * 2), muzzle_color)
 
-        # 如果血量大于1，在头顶显示迷你血槽方块
+        # 4. 血条、补给特效与弹药
+        top_offset = 18 if (is_micro or auto_clear) else 8
         if tank.max_health > 1:
             bar_w = size * 0.8
             bar_h = 3
             bar_x = x + size * 0.1
-            bar_y = y - 6
+            bar_y = y - top_offset
             painter.fillRect(QRectF(bar_x, bar_y, bar_w, bar_h), QColor("#333333"))
             curr_w = bar_w * (tank.health / tank.max_health)
+            painter.fillRect(QRectF(bar_x, bar_y, curr_w, bar_h), QColor("#2ECC71"))
+            top_offset += 5
+
+        # 补给获得特效 (+AMMO)
+        if tank.just_resupplied_timer > 0:
+            painter.setFont(QFont("Courier New", 8, QFont.Bold))
+            painter.setPen(QPen(QColor("#2ECC71")))
+            painter.drawText(QRectF(x - 10, y - top_offset - 10, size + 20, 10), Qt.AlignCenter, "+AMMO")
+        elif tank.camp == Camp.PLAYER and tank.ammo == 0:
+            painter.setFont(QFont("Courier New", 7, QFont.Bold))
+            painter.setPen(QPen(QColor("#E74C3C")))
+            painter.drawText(QRectF(x - 10, y - top_offset - 8, size + 20, 10), Qt.AlignCenter, "NO AMMO")
+
+    @staticmethod
+    def _draw_defense_tower(painter: QPainter, tower: Tank, is_selected: bool, is_micro: bool) -> None:
+        """
+        绘制坚固的防御要塞（纯视野雷达哨所、加农防御炮台、弹药补给要塞）
+        """
+        size = tower.size
+        x = tower.x
+        y = tower.y
+        base_color = QColor(tower.color)
+        border_pen = QPen(QColor("#111111"), 1.5)
+
+        # 1. 补给塔有效半径光环
+        if tower.resupply_radius > 0:
+            cx = x + size / 2.0
+            cy = y + size / 2.0
+            r = tower.resupply_radius
+            aura_pen = QPen(QColor(46, 204, 113, 100), 1, Qt.DashLine)
+            painter.setPen(aura_pen)
+            painter.setBrush(QColor(46, 204, 113, 15))
+            painter.drawEllipse(QRectF(cx - r, cy - r, r * 2, r * 2))
+
+        # 2. 选中绿框
+        if is_selected:
+            sel_pen = QPen(QColor("#2ECC71"), 1.5, Qt.DashLine)
+            painter.setPen(sel_pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(QRectF(x - 4, y - 4, size + 8, size + 8))
+
+        # 3. 要塞四角外包围防壁（四个角块）
+        corner_s = size * 0.3
+        for cx in (x, x + size - corner_s):
+            for cy in (y, y + size - corner_s):
+                painter.fillRect(QRectF(cx, cy, corner_s, corner_s), base_color.darker(130))
+                painter.setPen(border_pen)
+                painter.drawRect(QRectF(cx, cy, corner_s, corner_s))
+
+        # 4. 要塞中心主方块
+        margin = size * 0.15
+        core_rect = QRectF(x + margin, y + margin, size - margin * 2, size - margin * 2)
+        painter.fillRect(core_rect, base_color)
+        painter.setPen(border_pen)
+        painter.drawRect(core_rect)
+
+        # 5. 根据防御塔类型绘制核心功能装置
+        cx = x + size / 2.0
+        cy = y + size / 2.0
+
+        if tower.tower_type == "radar":
+            # 纯视野雷达塔：中心雷达天线阵列与微光绿核
+            r_size = size * 0.35
+            painter.fillRect(QRectF(cx - r_size / 2.0, cy - r_size / 2.0, r_size, r_size), QColor("#1ABC9C"))
+            painter.setPen(QPen(QColor("#FFFFFF"), 1))
+            painter.drawCross(int(cx), int(cy), int(r_size / 2.0)) if hasattr(painter, 'drawCross') else None
+            painter.drawLine(int(cx - r_size / 2.0), int(cy), int(cx + r_size / 2.0), int(cy))
+            painter.drawLine(int(cx), int(cy - r_size / 2.0), int(cx), int(cy + r_size / 2.0))
+
+            painter.setFont(QFont("Courier New", 8, QFont.Bold))
+            painter.setPen(QPen(QColor("#1ABC9C")))
+            painter.drawText(QRectF(x - 15, y - 14, size + 30, 10), Qt.AlignCenter, "[RADAR]")
+
+        elif tower.tower_type == "cannon":
+            # 带炮台的加农防御塔：中心粗壮旋转加农炮口
+            cannon_len = size * 0.45
+            bar_w = size * 0.22
+            p_dx = tower.direction.dx * cannon_len
+            p_dy = tower.direction.dy * cannon_len
+            painter.fillRect(QRectF(cx - bar_w / 2.0 + p_dx * 0.4, cy - bar_w / 2.0 + p_dy * 0.4, bar_w, bar_w), QColor("#000000"))
+
+            # 炮塔座
+            painter.fillRect(QRectF(cx - 5, cy - 5, 10, 10), QColor("#333333"))
+
+            painter.setFont(QFont("Courier New", 8, QFont.Bold))
+            painter.setPen(QPen(QColor("#BB8FCE")))
+            painter.drawText(QRectF(x - 15, y - 14, size + 30, 10), Qt.AlignCenter, "[CANNON]")
+
+        elif tower.tower_type == "supply":
+            # 弹药补给要塞 (核心鹰巢重制版)：中心白色与金黄色弹药补给十字
+            plus_len = size * 0.35
+            plus_w = size * 0.12
+            painter.fillRect(QRectF(cx - plus_w / 2.0, cy - plus_len / 2.0, plus_w, plus_len), QColor("#FFFFFF"))
+            painter.fillRect(QRectF(cx - plus_len / 2.0, cy - plus_w / 2.0, plus_len, plus_w), QColor("#FFFFFF"))
+
+            painter.setFont(QFont("Courier New", 8, QFont.Bold))
+            painter.setPen(QPen(QColor("#F1C40F")))
+            painter.drawText(QRectF(x - 20, y - 14, size + 40, 10), Qt.AlignCenter, "[BASE+AMMO]")
+
+        # 6. 血条
+        if tower.max_health > 1:
+            bar_w = size * 0.85
+            bar_h = 3
+            bar_x = x + size * 0.075
+            bar_y = y - 6
+            painter.fillRect(QRectF(bar_x, bar_y, bar_w, bar_h), QColor("#333333"))
+            curr_w = bar_w * (tower.health / tower.max_health)
             painter.fillRect(QRectF(bar_x, bar_y, curr_w, bar_h), QColor("#2ECC71"))
 
     @staticmethod
     def draw_bullet(painter: QPainter, bullet: Bullet) -> None:
-        """
-        绘制由正方形拼成的【品字形】炮弹：
-        微型的品字形，指向运动方向
-        """
         if not bullet.alive:
             return
 
@@ -198,3 +333,54 @@ class PixelRenderer:
             painter.fillRect(rect, bullet_color)
             painter.setPen(border_pen)
             painter.drawRect(rect)
+
+    @staticmethod
+    def draw_selection_box(painter: QPainter, x1: float, y1: float, x2: float, y2: float) -> None:
+        rx = min(x1, x2)
+        ry = min(y1, y2)
+        rw = abs(x2 - x1)
+        rh = abs(y2 - y1)
+
+        if rw <= 1 and rh <= 1:
+            return
+
+        rect = QRectF(rx, ry, rw, rh)
+        painter.fillRect(rect, QColor(46, 204, 113, 40))
+        painter.setPen(QPen(QColor(46, 204, 113), 1, Qt.SolidLine))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(rect)
+
+    @staticmethod
+    def draw_command_marker(painter: QPainter, x: float, y: float, is_attack: bool = False) -> None:
+        if is_attack:
+            painter.setPen(QPen(QColor("#E74C3C"), 2))
+            r = 10
+            painter.drawEllipse(QRectF(x - r, y - r, r * 2, r * 2))
+            painter.drawLine(int(x - r - 4), int(y), int(x + r + 4), int(y))
+            painter.drawLine(int(x), int(y - r - 4), int(x), int(y + r + 4))
+        else:
+            painter.setPen(QPen(QColor("#2ECC71"), 1.5))
+            r = 8
+            painter.drawEllipse(QRectF(x - r, y - r, r * 2, r * 2))
+            painter.drawLine(int(x - 4), int(y), int(x + 4), int(y))
+            painter.drawLine(int(x), int(y - 4), int(x), int(y + 4))
+
+    @staticmethod
+    def draw_fog_of_war(painter: QPainter, width: int, height: int, sight_rects: List[Rect]) -> None:
+        fog_img = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
+        fog_img.fill(QColor(10, 10, 16, 225))
+
+        fog_painter = QPainter(fog_img)
+        fog_painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        for r in sight_rects:
+            fog_painter.fillRect(QRectF(r.x, r.y, r.width, r.height), Qt.transparent)
+
+        fog_painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        radar_pen = QPen(QColor(46, 204, 113, 60), 1, Qt.DashLine)
+        fog_painter.setPen(radar_pen)
+        fog_painter.setBrush(Qt.NoBrush)
+        for r in sight_rects:
+            fog_painter.drawRect(QRectF(r.x, r.y, r.width, r.height))
+
+        fog_painter.end()
+        painter.drawImage(0, 0, fog_img)

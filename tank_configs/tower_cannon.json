@@ -1,0 +1,17 @@
+{
+  "name": "Heavy Cannon Defense Tower",
+  "speed": 0.0,
+  "size": 36,
+  "color": "#8E44AD",
+  "track_color": "#5B2C6F",
+  "bullet_speed": 7.0,
+  "bullet_size": 14,
+  "bullet_color": "#BB8FCE",
+  "fire_cooldown": 25,
+  "health": 6,
+  "is_tower": true,
+  "can_attack": true,
+  "tower_type": "cannon",
+  "resupply_radius": 0.0,
+  "resupply_interval": 0
+}

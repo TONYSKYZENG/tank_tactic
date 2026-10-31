@@ -1,13 +1,69 @@
 {
-  "name": "Mission 1: Defense of Eagle Base",
+  "name": "Mission 1: Defense of Eagle Fortress",
   "map_file": "maps/level_01.json",
+  "fog_of_war": true,
+  "limited_ammo": true,
   "player": {
     "config_file": "tank_configs/player_tank.json",
     "spawn": {
-      "x": 6,
+      "x": 7,
       "y": 14
-    }
+    },
+    "vision_size": 288,
+    "ammo": 25
   },
+  "player_units": [
+    {
+      "id": "core_supply_base",
+      "config_file": "tank_configs/tower_supply.json",
+      "spawn": {
+        "x": 9,
+        "y": 14
+      },
+      "vision_size": 320,
+      "ammo": -1
+    },
+    {
+      "id": "radar_tower",
+      "config_file": "tank_configs/tower_radar.json",
+      "spawn": {
+        "x": 2,
+        "y": 12
+      },
+      "vision_size": 560,
+      "ammo": 0
+    },
+    {
+      "id": "cannon_tower",
+      "config_file": "tank_configs/tower_cannon.json",
+      "spawn": {
+        "x": 17,
+        "y": 12
+      },
+      "vision_size": 280,
+      "ammo": 40
+    },
+    {
+      "id": "player_alpha",
+      "config_file": "tank_configs/player_tank.json",
+      "spawn": {
+        "x": 7,
+        "y": 14
+      },
+      "vision_size": 260,
+      "ammo": 20
+    },
+    {
+      "id": "player_bravo",
+      "config_file": "tank_configs/player_tank.json",
+      "spawn": {
+        "x": 11,
+        "y": 14
+      },
+      "vision_size": 260,
+      "ammo": 20
+    }
+  ],
   "enemies": [
     {
       "id": "e_patrol_1",
@@ -16,7 +72,10 @@
         "x": 0,
         "y": 0
       },
-      "tactic": "patrol"
+      "tactic": "patrol",
+      "vision_size": 250,
+      "ammo": 20,
+      "visibility": 1.0
     },
     {
       "id": "e_fast_1",
@@ -25,7 +84,10 @@
         "x": 9,
         "y": 0
       },
-      "tactic": "charge_base"
+      "tactic": "charge_base",
+      "vision_size": 220,
+      "ammo": 15,
+      "visibility": 0.65
     },
     {
       "id": "e_hunter_1",
@@ -34,7 +96,10 @@
         "x": 19,
         "y": 0
       },
-      "tactic": "hunter"
+      "tactic": "hunter",
+      "vision_size": -1,
+      "ammo": -1,
+      "visibility": 0.85
     }
   ]
 }

@@ -16,8 +16,8 @@ from .headless_runner import HeadlessGameRunner
 class WebUIServer(QObject):
     """
     WebUI 与 VNC 流服务器：
-    - 提供 HTTP 静态服务（提供 Web 前端页面）
-    - 提供 WebSocket 二进制高速推流与输入按键中继
+    - 提供 HTTP 静态服务
+    - 提供 WebSocket 二进制高速推流与 RTS 鼠标/键盘输入中继
     """
 
     def __init__(self, mission: Mission, game_map: GameMap, base_dir: Path,
@@ -31,7 +31,6 @@ class WebUIServer(QObject):
 
         self.static_dir = Path(__file__).resolve().parent / "static"
         self.clients = []
-        self.last_status_sent_time = 0
 
         # 1. 创建后台游戏运行器
         self.runner = HeadlessGameRunner(self.mission, self.game_map, self.base_dir, self)
@@ -43,7 +42,7 @@ class WebUIServer(QObject):
             raise RuntimeError(f"WebSocket 无法监听端口 {self.ws_port}")
         self.ws_server.newConnection.connect(self._on_new_connection)
 
-        # 3. 启动 HTTP 静态文件服务 (后台守护线程)
+        # 3. 启动 HTTP 静态文件服务
         self.httpd = None
         self._start_http_server()
 
@@ -58,7 +57,7 @@ class WebUIServer(QObject):
                 super().__init__(*args, directory=str(static_path), **kwargs)
 
             def log_message(self, format, *args):
-                pass  # 静音常规静态文件请求日志
+                pass
 
         try:
             self.httpd = ThreadingHTTPServer(('0.0.0.0', self.http_port), StaticHandler)
@@ -87,6 +86,8 @@ class WebUIServer(QObject):
             if msg_type in ("keydown", "keyup"):
                 key = data.get("key", "")
                 self.runner.handle_key_event(key, is_down=(msg_type == "keydown"))
+            elif msg_type in ("box_drag", "box_select", "context_cmd"):
+                self.runner.handle_mouse_event(data)
             elif msg_type == "ping":
                 client.sendTextMessage(json.dumps({"type": "pong"}))
         except Exception as e:
@@ -97,11 +98,9 @@ class WebUIServer(QObject):
         if not self.clients:
             return
 
-        # 广播二进制 JPEG 帧
         for client in self.clients:
             client.sendBinaryMessage(frame_bytes)
 
-        # 附带推送状态 (每 100ms 一次，避免占用带宽)
         status_msg = json.dumps({"type": "status", **status})
         for client in self.clients:
             client.sendTextMessage(status_msg)

@@ -1,22 +1,24 @@
 from pathlib import Path
-from typing import Set, Dict, Callable, Optional
-from PyQt5.QtCore import QObject, QTimer, QBuffer, QIODevice, pyqtSignal
+from typing import Set, Dict, Optional, Tuple, List
+from PyQt5.QtCore import QObject, QTimer, QBuffer, QIODevice, pyqtSignal, QPointF
 from PyQt5.QtGui import QImage, QPainter, QColor, QFont, QPen
 from PyQt5.QtCore import Qt
 
 from map_loader.models import GameMap, TileType
 from mission_loader.models import Mission
 from tank_configs.config_loader import TankConfig
-from physics.entities import Tank, Direction, Camp
+from physics.entities import Tank, Direction, Camp, Rect
 from physics.engine import PhysicsEngine
 from ai.controller import EnemyAIController
+from grouping.selection import SelectionManager
+from command.dispatcher import CommandDispatcher
+from command.tactics_mode import TacticMode
 from gui.renderer import PixelRenderer
 
 class HeadlessGameRunner(QObject):
     """
     后台无头游戏运行器：
-    脱离桌面 GUI 窗口运行，以 60 FPS 驱动物理与 AI，
-    通过 QImage 离屏渲染游戏画面，并通过信号向 Web 端输出实时 JPEG 帧与状态数据。
+    支持战争迷雾、视线正方形、有限弹药、敌军辨识度探测与 Web VNC 离屏推流
     """
 
     frame_ready = pyqtSignal(bytes, dict)
@@ -30,23 +32,30 @@ class HeadlessGameRunner(QObject):
         self.width = self.game_map.pixel_width
         self.height = self.game_map.pixel_height
 
-        # 离屏渲染缓冲区
         self.render_image = QImage(self.width, self.height, QImage.Format_RGB32)
 
-        # 物理与 AI
-        self.physics_engine = PhysicsEngine(self.game_map)
+        self.physics_engine = PhysicsEngine(
+            self.game_map,
+            fog_of_war_enabled=self.mission.fog_of_war,
+            limited_ammo_enabled=self.mission.limited_ammo
+        )
         self.ai_controller = EnemyAIController(self.physics_engine, self.game_map)
+        self.selection_mgr = SelectionManager()
+        self.command_dispatcher = CommandDispatcher()
 
-        # 键盘按键跟踪集合 (支持 Web 端传入的标准键名或 keyCode)
         self.active_keys: Set[str] = set()
 
-        # 状态
+        self.preview_box: Optional[Tuple[float, float, float, float]] = None
+        self.command_marker: Optional[Tuple[float, float, bool, int]] = None
+
         self.game_over = False
         self.game_victory = False
 
         self._setup_mission_entities()
 
-        # 60 FPS 定时器
+        if self.physics_engine.player_tanks:
+            self.selection_mgr.select_single(self.physics_engine.player_tanks[0])
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._step)
 
@@ -59,28 +68,38 @@ class HeadlessGameRunner(QObject):
     def _setup_mission_entities(self):
         tile_size = self.game_map.tile_size
 
-        # 1. 玩家坦克
-        player_cfg_path = self.base_dir / self.mission.player.config_file
-        self.player_config = TankConfig.from_json(player_cfg_path)
+        units_info = self.mission.player_units if self.mission.player_units else [self.mission.player]
+        for p_info in units_info:
+            cfg_path = self.base_dir / p_info.config_file
+            cfg = TankConfig.from_json(cfg_path)
 
-        req_px = self.mission.player.spawn.x * tile_size
-        req_py = self.mission.player.spawn.y * tile_size
-        spawn_x, spawn_y = self.physics_engine.find_nearest_free_position(req_px, req_py, self.player_config.size)
+            req_x = p_info.spawn.x * tile_size
+            req_y = p_info.spawn.y * tile_size
+            sx, sy = self.physics_engine.find_nearest_free_position(req_x, req_y, cfg.size)
 
-        self.player_tank = Tank(
-            x=spawn_x,
-            y=spawn_y,
-            size=self.player_config.size,
-            speed=self.player_config.speed,
-            camp=Camp.PLAYER,
-            color=self.player_config.color,
-            health=self.player_config.health,
-            tank_id="player"
-        )
-        self.player_tank.fire_cooldown_max = self.player_config.fire_cooldown
-        self.physics_engine.set_player_tank(self.player_tank)
+            tank = Tank(
+                x=sx,
+                y=sy,
+                size=cfg.size,
+                speed=cfg.speed,
+                camp=Camp.PLAYER,
+                color=cfg.color,
+                health=cfg.health,
+                tank_id=p_info.id,
+                vision_size=p_info.vision_size,
+                ammo=p_info.ammo,
+                visibility=1.0,
+                is_tower=cfg.is_tower,
+                can_attack=cfg.can_attack,
+                tower_type=cfg.tower_type,
+                resupply_radius=cfg.resupply_radius,
+                resupply_interval=cfg.resupply_interval
+            )
+            tank.fire_cooldown_max = cfg.fire_cooldown
+            tank._config = cfg
+            self.physics_engine.add_player_tank(tank)
+            self.command_dispatcher.register_tank(tank)
 
-        # 2. 敌军坦克
         for enemy_info in self.mission.enemies:
             cfg_path = self.base_dir / enemy_info.config_file
             cfg = TankConfig.from_json(cfg_path)
@@ -97,40 +116,141 @@ class HeadlessGameRunner(QObject):
                 camp=Camp.ENEMY,
                 color=cfg.color,
                 health=cfg.health,
-                tank_id=enemy_info.id
+                tank_id=enemy_info.id,
+                vision_size=enemy_info.vision_size,
+                ammo=enemy_info.ammo,
+                visibility=enemy_info.visibility,
+                is_tower=cfg.is_tower,
+                can_attack=cfg.can_attack,
+                tower_type=cfg.tower_type,
+                resupply_radius=cfg.resupply_radius,
+                resupply_interval=cfg.resupply_interval
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
+            tank._config = cfg
             self.ai_controller.register_enemy(tank, cfg, enemy_info.tactic)
 
+    def handle_mouse_event(self, data: dict):
+        ev_type = data.get("type")
+        x = float(data.get("x", 0))
+        y = float(data.get("y", 0))
+
+        if ev_type == "box_drag":
+            x1, y1 = float(data.get("x1", 0)), float(data.get("y1", 0))
+            x2, y2 = float(data.get("x2", 0)), float(data.get("y2", 0))
+            self.preview_box = (x1, y1, x2, y2)
+        elif ev_type == "box_select":
+            self.preview_box = None
+            x1, y1 = float(data.get("x1", 0)), float(data.get("y1", 0))
+            x2, y2 = float(data.get("x2", 0)), float(data.get("y2", 0))
+            rw = abs(x2 - x1)
+            rh = abs(y2 - y1)
+            if rw < 8 and rh < 8:
+                clicked = None
+                for t in self.physics_engine.player_tanks:
+                    if t.alive and t.rect.collides_with(Rect(x1 - 3, y1 - 3, 6, 6)):
+                        clicked = t
+                        break
+                if clicked:
+                    self.selection_mgr.select_single(clicked)
+                else:
+                    self.selection_mgr.clear_selection()
+            else:
+                rx = min(x1, x2)
+                ry = min(y1, y2)
+                self.selection_mgr.select_box(Rect(rx, ry, rw, rh), self.physics_engine.player_tanks)
+
+        elif ev_type == "context_cmd":
+            selected = self.selection_mgr.get_selected()
+            if not selected:
+                micro = self.selection_mgr.get_micro_tank()
+                if micro and micro.alive:
+                    selected = [micro]
+
+            if selected:
+                # 1. 检查是否右键友军 -> 护卫该友军
+                target_friendly = None
+                for ally in self.physics_engine.player_tanks:
+                    if ally.alive and ally not in selected and ally.rect.collides_with(Rect(x - 6, y - 6, 12, 12)):
+                        target_friendly = ally
+                        break
+
+                if target_friendly:
+                    self.command_dispatcher.issue_guard_unit(selected, target_friendly)
+                    self.command_marker = (target_friendly.x + target_friendly.size / 2.0,
+                                           target_friendly.y + target_friendly.size / 2.0, False, 20)
+                else:
+                    # 2. 检查是否右键可见敌军 -> 集火
+                    target_enemy = None
+                    for e in self.physics_engine.get_visible_enemies():
+                        if e.alive and e.rect.collides_with(Rect(x - 6, y - 6, 12, 12)):
+                            target_enemy = e
+                            break
+
+                    if target_enemy:
+                        self.command_dispatcher.issue_attack_target(selected, target_enemy, self.physics_engine)
+                        self.command_marker = (target_enemy.x + target_enemy.size / 2.0,
+                                               target_enemy.y + target_enemy.size / 2.0, True, 20)
+                    else:
+                        # 3. 移动
+                        self.command_dispatcher.issue_move(selected, x, y)
+                        self.command_marker = (x, y, False, 20)
+
     def handle_key_event(self, key_name: str, is_down: bool):
-        """处理来自 Web 端的键盘事件"""
         norm_key = key_name.lower()
         if is_down:
             self.active_keys.add(norm_key)
-            if norm_key in ("space", " "):
-                self._fire_bullet()
-            elif norm_key in ("r", "keyr") and (self.game_over or self.game_victory):
+
+            if norm_key == "tab":
+                self.selection_mgr.cycle_micro_tank(self.physics_engine.player_tanks)
+            elif norm_key in ("space", " "):
+                self._fire_micro_tank()
+            elif norm_key == "1":
+                self.command_dispatcher.issue_tactic(self.selection_mgr.get_selected(), TacticMode.AGGRESSIVE)
+            elif norm_key == "2":
+                self.command_dispatcher.issue_tactic(self.selection_mgr.get_selected(), TacticMode.DEFENSIVE)
+            elif norm_key == "3":
+                selected = self.selection_mgr.get_selected()
+                core_tower = None
+                for t in self.physics_engine.player_tanks:
+                    if t.alive and t.is_tower and t.tower_type == "supply":
+                        core_tower = t
+                        break
+                guard_target = core_tower if core_tower else self.selection_mgr.get_micro_tank()
+                self.command_dispatcher.issue_tactic(selected, TacticMode.GUARD_UNIT, guard_target=guard_target)
+            elif norm_key == "b":
+                target_tanks = self.selection_mgr.get_selected()
+                if not target_tanks:
+                    micro = self.selection_mgr.get_micro_tank()
+                    if micro and micro.alive:
+                        target_tanks = [micro]
+                if target_tanks:
+                    self.command_dispatcher.toggle_auto_clear_path(target_tanks)
+            elif norm_key == "s":
+                self.command_dispatcher.issue_stop(self.selection_mgr.get_selected())
+            elif norm_key == "r" and (self.game_over or self.game_victory):
                 self.restart()
         else:
             self.active_keys.discard(norm_key)
 
-    def _fire_bullet(self):
-        if self.player_tank and self.player_tank.alive:
-            self.physics_engine.spawn_bullet(
-                tank=self.player_tank,
-                bullet_speed=self.player_config.bullet_speed,
-                bullet_size=self.player_config.bullet_size,
-                color=self.player_config.bullet_color
-            )
+    def _fire_micro_tank(self):
+        micro = self.selection_mgr.get_micro_tank()
+        if micro and micro.alive:
+            cfg = getattr(micro, "_config", None)
+            b_speed = cfg.bullet_speed if cfg else 6.0
+            b_size = cfg.bullet_size if cfg else 12
+            b_color = cfg.bullet_color if cfg else "#FFFFFF"
+            self.physics_engine.spawn_bullet(micro, b_speed, b_size, b_color)
 
-    def _process_player_input(self):
-        if not self.player_tank or not self.player_tank.alive:
-            return
+    def _process_micro_tank_input(self) -> bool:
+        micro = self.selection_mgr.get_micro_tank()
+        if not micro or not micro.alive:
+            return False
 
         direction = None
         if "arrowup" in self.active_keys or "w" in self.active_keys or "up" in self.active_keys:
             direction = Direction.UP
-        elif "arrowdown" in self.active_keys or "s" in self.active_keys or "down" in self.active_keys:
+        elif "arrowdown" in self.active_keys or "down" in self.active_keys:
             direction = Direction.DOWN
         elif "arrowleft" in self.active_keys or "a" in self.active_keys or "left" in self.active_keys:
             direction = Direction.LEFT
@@ -138,80 +258,130 @@ class HeadlessGameRunner(QObject):
             direction = Direction.RIGHT
 
         if direction is not None:
-            self.physics_engine.move_tank(self.player_tank, direction)
+            self.physics_engine.move_tank(micro, direction)
+            return True
+        return False
 
     def restart(self):
-        """重置任务"""
         self.game_over = False
         self.game_victory = False
         self.active_keys.clear()
-        self.physics_engine = PhysicsEngine(self.game_map)
+        self.preview_box = None
+        self.command_marker = None
+        self.physics_engine = PhysicsEngine(
+            self.game_map,
+            fog_of_war_enabled=self.mission.fog_of_war,
+            limited_ammo_enabled=self.mission.limited_ammo
+        )
         self.ai_controller = EnemyAIController(self.physics_engine, self.game_map)
+        self.selection_mgr = SelectionManager()
+        self.command_dispatcher = CommandDispatcher()
         self._setup_mission_entities()
+        if self.physics_engine.player_tanks:
+            self.selection_mgr.select_single(self.physics_engine.player_tanks[0])
 
     def _check_game_status(self):
-        base_alive = False
-        for row in range(self.game_map.rows):
-            for col in range(self.game_map.cols):
-                if self.game_map.get_tile(col, row) == TileType.BASE:
-                    base_alive = True
-                    break
-            if base_alive:
+        core_tower = None
+        for t in self.physics_engine.player_tanks:
+            if t.is_tower and t.tower_type == "supply":
+                core_tower = t
                 break
 
-        if not self.player_tank.alive or not base_alive:
+        base_alive = True
+        if core_tower is not None:
+            base_alive = core_tower.alive
+
+        alive_players = [t for t in self.physics_engine.player_tanks if t.alive]
+        alive_enemies = [e for e in self.physics_engine.enemy_tanks if e.alive]
+        visible_enemies = self.physics_engine.get_visible_enemies()
+
+        if not base_alive or not alive_players:
             self.game_over = True
-        elif len(self.physics_engine.enemy_tanks) == 0:
+        elif not alive_enemies:
             self.game_victory = True
 
+        micro = self.selection_mgr.get_micro_tank()
+        micro_tactic = self.command_dispatcher.get_tactic(micro) if micro else TacticMode.MANUAL_OR_IDLE
+        micro_auto_clear = self.command_dispatcher.is_auto_clear_path(micro) if micro else False
+
         return {
-            "player_hp": self.player_tank.health if self.player_tank.alive else 0,
-            "enemies_left": len(self.physics_engine.enemy_tanks),
+            "alive_players": len(alive_players),
+            "total_players": len(self.physics_engine.player_tanks),
+            "enemies_left": len(alive_enemies),
+            "enemies_spotted": len(visible_enemies),
             "base_alive": base_alive,
+            "selected_count": len(self.selection_mgr.get_selected()),
+            "micro_tank_id": micro.id if micro else "None",
+            "micro_ammo": micro.ammo if micro else -1,
+            "micro_max_ammo": micro.max_ammo if micro else -1,
+            "micro_tactic": micro_tactic.value,
+            "micro_auto_clear": micro_auto_clear,
+            "fog_enabled": self.physics_engine.fog_of_war_enabled,
+            "limited_ammo_enabled": self.physics_engine.limited_ammo_enabled,
             "game_over": self.game_over,
             "game_victory": self.game_victory,
             "mission_name": self.mission.name
         }
 
     def _render_frame(self) -> bytes:
-        """执行离屏像素绘制并输出 JPEG 图像字节"""
         painter = QPainter(self.render_image)
         painter.setRenderHint(QPainter.Antialiasing, False)
 
-        # 1. 经典黑底
         painter.fillRect(self.render_image.rect(), QColor("#000000"))
-
-        # 2. 地图
         PixelRenderer.draw_map(painter, self.game_map)
 
-        # 3. 玩家品字形坦克
-        if self.player_tank and self.player_tank.alive:
-            PixelRenderer.draw_tank(painter, self.player_tank)
+        for tank in self.physics_engine.player_tanks:
+            if tank.alive:
+                is_sel = self.selection_mgr.is_selected(tank)
+                is_micro = self.selection_mgr.is_micro_tank(tank)
+                auto_clr = self.command_dispatcher.is_auto_clear_path(tank)
+                PixelRenderer.draw_tank(painter, tank, is_selected=is_sel, is_micro=is_micro, auto_clear=auto_clr)
 
-        # 4. 敌军品字形坦克
         for enemy in self.physics_engine.enemy_tanks:
-            if enemy.alive:
+            if enemy.alive and self.physics_engine.is_enemy_visible(enemy):
                 PixelRenderer.draw_tank(painter, enemy)
 
-        # 5. 品字形炮弹
-        for bullet in self.physics_engine.bullets:
-            PixelRenderer.draw_bullet(painter, bullet)
+        sight_rects = self.physics_engine.get_player_sight_rects()
+        has_full_vision = any(t.vision_size < 0 for t in self.physics_engine.player_tanks if t.alive)
 
-        # 6. 游戏结束/胜利覆层
+        for bullet in self.physics_engine.bullets:
+            if not bullet.alive:
+                continue
+            if bullet.camp == Camp.PLAYER or not self.physics_engine.fog_of_war_enabled or has_full_vision:
+                PixelRenderer.draw_bullet(painter, bullet)
+            else:
+                if any(bullet.rect.collides_with(sr) for sr in sight_rects):
+                    PixelRenderer.draw_bullet(painter, bullet)
+
+        if self.physics_engine.fog_of_war_enabled and not has_full_vision:
+            PixelRenderer.draw_fog_of_war(
+                painter,
+                self.game_map.pixel_width,
+                self.game_map.pixel_height,
+                sight_rects
+            )
+
+        if self.command_marker:
+            mx, my, is_atk, _ = self.command_marker
+            PixelRenderer.draw_command_marker(painter, mx, my, is_attack=is_atk)
+
+        if self.preview_box:
+            bx1, by1, bx2, by2 = self.preview_box
+            PixelRenderer.draw_selection_box(painter, bx1, by1, bx2, by2)
+
         if self.game_over:
             painter.fillRect(self.render_image.rect(), QColor(0, 0, 0, 160))
             painter.setPen(QPen(QColor("#E74C3C")))
-            painter.setFont(QFont("Courier New", 32, QFont.Bold))
-            painter.drawText(self.render_image.rect(), Qt.AlignCenter, "GAME OVER\n[Press R to Restart]")
+            painter.setFont(QFont("Courier New", 28, QFont.Bold))
+            painter.drawText(self.render_image.rect(), Qt.AlignCenter, "GAME OVER\n[按 R 重新挑战]")
         elif self.game_victory:
             painter.fillRect(self.render_image.rect(), QColor(0, 0, 0, 160))
             painter.setPen(QPen(QColor("#2ECC71")))
-            painter.setFont(QFont("Courier New", 32, QFont.Bold))
-            painter.drawText(self.render_image.rect(), Qt.AlignCenter, "VICTORY!\n[Press R to Restart]")
+            painter.setFont(QFont("Courier New", 28, QFont.Bold))
+            painter.drawText(self.render_image.rect(), Qt.AlignCenter, "VICTORY!\n[全歼敌军，大获全胜]")
 
         painter.end()
 
-        # 编码为 JPEG
         buffer = QBuffer()
         buffer.open(QIODevice.WriteOnly)
         self.render_image.save(buffer, "JPEG", 70)
@@ -219,9 +389,23 @@ class HeadlessGameRunner(QObject):
 
     def _step(self):
         if not self.game_over and not self.game_victory:
-            self._process_player_input()
+            has_manual_input = self._process_micro_tank_input()
+            self.command_dispatcher.update(
+                self.physics_engine.player_tanks,
+                self.selection_mgr.get_micro_tank(),
+                has_manual_input,
+                self.physics_engine,
+                self.game_map
+            )
             self.ai_controller.update()
             self.physics_engine.update()
+
+            if self.command_marker:
+                mx, my, is_atk, lf = self.command_marker
+                if lf > 1:
+                    self.command_marker = (mx, my, is_atk, lf - 1)
+                else:
+                    self.command_marker = None
 
         status = self._check_game_status()
         frame_bytes = self._render_frame()

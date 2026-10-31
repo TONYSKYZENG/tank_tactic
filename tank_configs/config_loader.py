@@ -14,6 +14,12 @@ class TankConfig:
     bullet_color: str = "#FFFFFF"
     fire_cooldown: int = 15
     health: int = 3
+    # ===== 防御塔专属扩展属性 =====
+    is_tower: bool = False             # 是否为防御塔 (固定不可移动)
+    can_attack: bool = True           # 是否具备攻击炮台
+    tower_type: str = "general"       # 类型: "radar"(纯雷达视野), "cannon"(重型炮台), "supply"(弹药补给要塞)
+    resupply_radius: float = 0.0      # 弹药补给有效半径 (像素)
+    resupply_interval: int = 30       # 补充弹药的时间间隔 (帧数，30 帧约 0.5 秒)
 
     @classmethod
     def from_json(cls, file_path: str or Path) -> "TankConfig":

@@ -1,0 +1,17 @@
+{
+  "name": "Radar Scout Tower",
+  "speed": 0.0,
+  "size": 36,
+  "color": "#16A085",
+  "track_color": "#0E6655",
+  "bullet_speed": 0.0,
+  "bullet_size": 0,
+  "bullet_color": "#FFFFFF",
+  "fire_cooldown": 9999,
+  "health": 4,
+  "is_tower": true,
+  "can_attack": false,
+  "tower_type": "radar",
+  "resupply_radius": 0.0,
+  "resupply_interval": 0
+}

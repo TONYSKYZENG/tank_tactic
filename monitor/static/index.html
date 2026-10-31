@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tank Tactics - Omniscient Monitor (Read-Only)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #0C0D12;
+      color: #E2E8F0;
+      font-family: 'Courier New', Courier, monospace, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 顶部监视器导航 */
+    header {
+      background-color: #151722;
+      border-bottom: 2px solid #282C3F;
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .badge-ro {
+      background: #3B82F6;
+      color: #FFF;
+      font-weight: bold;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: 1px;
+    }
+
+    h1 {
+      font-size: 17px;
+      color: #F8FAFC;
+      letter-spacing: 1px;
+    }
+
+    .telemetry-meta {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 12px;
+      color: #94A3B8;
+    }
+
+    .pill {
+      background: #1E2235;
+      padding: 4px 10px;
+      border-radius: 12px;
+      border: 1px solid #333952;
+    }
+
+    /* 主视窗两栏布局 */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 740px 1fr;
+      gap: 20px;
+      padding: 16px 24px;
+      max-width: 1700px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 1280px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* 左侧：全息战术雷达地图 */
+    .radar-card {
+      background: #141724;
+      border: 1px solid #282D42;
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: bold;
+      color: #38BDF8;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #24293D;
+      padding-bottom: 8px;
+    }
+
+    .radar-viewport {
+      background: #000;
+      border: 2px solid #333B57;
+      border-radius: 4px;
+      line-height: 0;
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      box-shadow: inset 0 0 20px rgba(0,0,0,0.9);
+    }
+
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+    }
+
+    .radar-legend {
+      display: flex;
+      gap: 16px;
+      font-size: 11px;
+      color: #94A3B8;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+    }
+
+    /* 右侧：全量单位属性监视器 */
+    .inspector-card {
+      background: #141724;
+      border: 1px solid #282D42;
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow: hidden;
+    }
+
+    .tables-scroll {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+      max-height: calc(100vh - 140px);
+      padding-right: 4px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: bold;
+      padding: 4px 8px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .section-player {
+      background: rgba(46, 204, 113, 0.15);
+      color: #4ADE80;
+      border-left: 3px solid #2ECC71;
+    }
+
+    .section-enemy {
+      background: rgba(231, 76, 60, 0.15);
+      color: #F87171;
+      border-left: 3px solid #E74C3C;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      margin-bottom: 12px;
+    }
+
+    th {
+      background: #1C2133;
+      color: #94A3B8;
+      text-align: left;
+      padding: 6px 8px;
+      border-bottom: 1px solid #2F3652;
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #1E2336;
+      white-space: nowrap;
+    }
+
+    tr:hover {
+      background: #1A1F30;
+    }
+
+    .hp-bar-bg {
+      width: 50px;
+      height: 6px;
+      background: #333;
+      border-radius: 3px;
+      overflow: hidden;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    .hp-bar-fill {
+      height: 100%;
+      background: #2ECC71;
+    }
+
+    .tag {
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: bold;
+    }
+
+    .tag-tower {
+      background: #5B2C6F;
+      color: #E8DAEF;
+    }
+
+    .tag-tank {
+      background: #2C3E50;
+      color: #D5D8DC;
+    }
+
+    .tag-spotted {
+      background: #E74C3C;
+      color: #FFF;
+    }
+
+    .tag-hidden {
+      background: #475569;
+      color: #94A3B8;
+    }
+
+    /* 底部提示 */
+    footer {
+      background: #0E1017;
+      border-top: 1px solid #1E2232;
+      padding: 6px 24px;
+      font-size: 11px;
+      color: #64748B;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <span class="badge-ro">🔒 READ-ONLY MONITOR</span>
+      <h1>战术指挥中心 · 全知遥测系统 (上帝视角)</h1>
+    </div>
+    <div class="telemetry-meta">
+      <div class="pill">端口: <span id="meta-port">--</span></div>
+      <div class="pill">刷新率: <span id="meta-hz">10 Hz</span></div>
+      <div class="pill" id="meta-status">战局: 初始化中...</div>
+    </div>
+  </header>
+
+  <main>
+    <!-- 左侧：全息战术上帝小地图 -->
+    <div class="radar-card">
+      <div class="card-title">
+        <span>👁️ 全息战术上帝雷达 (透视一切隐蔽与迷雾)</span>
+        <span style="font-size: 11px; color: #64748B;">[只读监视 · 无法操控]</span>
+      </div>
+
+      <div class="radar-viewport">
+        <canvas id="radar-canvas" width="720" height="576"></canvas>
+      </div>
+
+      <div class="radar-legend">
+        <div class="legend-item"><div class="dot" style="background:#2ECC71;"></div>我方机动战车</div>
+        <div class="legend-item"><div class="dot" style="background:#D4AF37;"></div>核心补给防御要塞</div>
+        <div class="legend-item"><div class="dot" style="background:#1ABC9C;"></div>雷达哨所</div>
+        <div class="legend-item"><div class="dot" style="background:#8E44AD;"></div>加农防御塔</div>
+        <div class="legend-item"><div class="dot" style="background:#E74C3C;"></div>敌军单位 (全知红点)</div>
+        <div class="legend-item"><div class="dot" style="background:#FFFFFF;"></div>飞行中炮弹</div>
+      </div>
+    </div>
+
+    <!-- 右侧：全量敌我属性表格 -->
+    <div class="inspector-card">
+      <div class="card-title">
+        <span>📊 战场单位实时属性监视器 (Live Unit Telemetry)</span>
+      </div>
+
+      <div class="tables-scroll">
+        <!-- 我方阵营表格 -->
+        <div>
+          <div class="section-title section-player">
+            <span>🛡️ 我方装甲集群与要塞设施 (<span id="cnt-player">0</span>)</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>类型</th>
+                <th>坐标 (X,Y)</th>
+                <th>生命值</th>
+                <th>弹药数</th>
+                <th>视野</th>
+                <th>战术模式</th>
+                <th>开路</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-player"></tbody>
+          </table>
+        </div>
+
+        <!-- 敌军阵营表格 (全知透视) -->
+        <div>
+          <div class="section-title section-enemy">
+            <span>⚠️ 敌军装甲部队 · 全知透视 (<span id="cnt-enemy">0</span>)</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>类型</th>
+                <th>坐标 (X,Y)</th>
+                <th>生命值</th>
+                <th>弹药数</th>
+                <th>视野</th>
+                <th>辨识度</th>
+                <th>我方侦测状态</th>
+                <th>战术</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-enemy"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    🔒 本页面为辅助只读监控 WebUI (Omniscient Observer Dashboard) | 默认监听 0.0.0.0，实时从后台引擎读取全量战局与属性，无任何客户端控制输入接口。
+  </footer>
+
+  <script>
+    const canvas = document.getElementById('radar-canvas');
+    const ctx = canvas.getContext('2d');
+    const metaPort = document.getElementById('meta-port');
+    const metaStatus = document.getElementById('meta-status');
+    const cntPlayer = document.getElementById('cnt-player');
+    const cntEnemy = document.getElementById('cnt-enemy');
+    const tbodyPlayer = document.getElementById('tbody-player');
+    const tbodyEnemy = document.getElementById('tbody-enemy');
+
+    metaPort.innerText = window.location.port || '8088';
+
+    async function fetchState() {
+      try {
+        const resp = await fetch('/api/state');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderRadar(data);
+        renderTables(data);
+      } catch (err) {
+        console.error("Fetch state error:", err);
+      }
+    }
+
+    // 每 100 毫秒轮询拉取一次全量上帝数据 (10 Hz)
+    setInterval(fetchState, 100);
+
+    function renderRadar(data) {
+      if (!data || !data.map) return;
+
+      const map = data.map;
+      const tile_size = map.tile_size || 36;
+
+      ctx.fillStyle = '#08090E';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 1. 绘制网格瓦片
+      if (map.grid) {
+        for (let r = 0; r < map.rows; r++) {
+          for (let c = 0; c < map.cols; c++) {
+            const tile = map.grid[r][c];
+            const x = c * tile_size;
+            const y = r * tile_size;
+            if (tile === 1) {
+              // 砖墙 (红砖)
+              ctx.fillStyle = '#783214';
+              ctx.fillRect(x, y, tile_size, tile_size);
+              ctx.strokeStyle = '#220B05';
+              ctx.strokeRect(x, y, tile_size, tile_size);
+            } else if (tile === 2) {
+              // 铁墙 (白银)
+              ctx.fillStyle = '#94A3B8';
+              ctx.fillRect(x, y, tile_size, tile_size);
+              ctx.strokeStyle = '#475569';
+              ctx.strokeRect(x, y, tile_size, tile_size);
+            }
+          }
+        }
+      }
+
+      // 2. 绘制我方单位及补给圈
+      if (data.player_units) {
+        data.player_units.forEach(u => {
+          const cx = u.x + u.size / 2;
+          const cy = u.y + u.size / 2;
+
+          // 补给光环
+          if (u.resupply_radius > 0) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, u.resupply_radius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(46, 204, 113, 0.4)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+
+          // 视线范围 (半透明白框)
+          if (u.vision_size > 0) {
+            const half = u.vision_size / 2;
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.15)';
+            ctx.strokeRect(cx - half, cy - half, u.vision_size, u.vision_size);
+          }
+
+          // 单位主体
+          ctx.fillStyle = u.color || '#2ECC71';
+          ctx.fillRect(u.x, u.y, u.size, u.size);
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(u.x, u.y, u.size, u.size);
+
+          // 名字标签
+          ctx.fillStyle = '#4ADE80';
+          ctx.font = '9px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(u.id, cx, u.y - 4);
+        });
+      }
+
+      // 3. 绘制敌方单位 (全知透视，即使在迷雾中也能看到！)
+      if (data.enemy_units) {
+        data.enemy_units.forEach(u => {
+          const cx = u.x + u.size / 2;
+          const cy = u.y + u.size / 2;
+
+          // 若在迷雾中未被我方侦测到，带有雷达扫描虚线红圈
+          if (!u.is_spotted) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, u.size, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(231, 76, 60, 0.5)';
+            ctx.setLineDash([3, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+
+          ctx.fillStyle = u.color || '#E74C3C';
+          ctx.fillRect(u.x, u.y, u.size, u.size);
+          ctx.strokeStyle = '#FFF';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(u.x, u.y, u.size, u.size);
+
+          ctx.fillStyle = u.is_spotted ? '#F87171' : '#FFA07A';
+          ctx.font = '9px monospace';
+          ctx.textAlign = 'center';
+          const spottedTag = u.is_spotted ? '' : '[隐]';
+          ctx.fillText(`${u.id}${spottedTag}`, cx, u.y - 4);
+        });
+      }
+
+      // 4. 绘制飞行炮弹
+      if (data.bullets) {
+        data.bullets.forEach(b => {
+          ctx.fillStyle = b.camp === 'player' ? '#FEF08A' : '#FCA5A5';
+          ctx.fillRect(b.x - 2, b.y - 2, 5, 5);
+        });
+      }
+    }
+
+    function renderTables(data) {
+      if (!data) return;
+
+      const pUnits = data.player_units || [];
+      const eUnits = data.enemy_units || [];
+
+      cntPlayer.innerText = pUnits.length;
+      cntEnemy.innerText = eUnits.length;
+
+      if (data.status) {
+        if (data.status.game_over) {
+          metaStatus.innerText = '战局: GAME OVER (失败)';
+          metaStatus.style.color = '#EF4444';
+        } else if (data.status.game_victory) {
+          metaStatus.innerText = '战局: VICTORY (大捷)';
+          metaStatus.style.color = '#EAB308';
+        } else {
+          metaStatus.innerText = '战局: 战斗进行中';
+          metaStatus.style.color = '#22C55E';
+        }
+      }
+
+      // 渲染我方表格
+      tbodyPlayer.innerHTML = pUnits.map(u => {
+        const hpPct = Math.max(0, Math.min(100, (u.health / u.max_health) * 100));
+        const typeTag = u.is_tower ? `<span class="tag tag-tower">${u.tower_type}</span>` : `<span class="tag tag-tank">战车</span>`;
+        const ammoStr = u.ammo === -1 ? '无限' : `${u.ammo}/${u.max_ammo}`;
+        const autoClearStr = u.auto_clear ? '<span style="color:#F97316;">ON</span>' : '<span style="color:#64748B;">OFF</span>';
+
+        return `
+          <tr>
+            <td><b>${u.id}</b></td>
+            <td>${typeTag}</td>
+            <td>(${Math.round(u.x)}, ${Math.round(u.y)})</td>
+            <td>
+              <div class="hp-bar-bg"><div class="hp-bar-fill" style="width:${hpPct}%;"></div></div>
+              ${u.health}/${u.max_health}
+            </td>
+            <td>${ammoStr}</td>
+            <td>${u.vision_size === -1 ? '全图' : u.vision_size}</td>
+            <td>${u.tactic || 'manual'}</td>
+            <td>${autoClearStr}</td>
+          </tr>
+        `;
+      }).join('');
+
+      // 渲染敌方表格
+      tbodyEnemy.innerHTML = eUnits.map(u => {
+        const hpPct = Math.max(0, Math.min(100, (u.health / u.max_health) * 100));
+        const ammoStr = u.ammo === -1 ? '无限' : `${u.ammo}/${u.max_ammo}`;
+        const spottedTag = u.is_spotted
+          ? `<span class="tag tag-spotted">已侦测暴露</span>`
+          : `<span class="tag tag-hidden">隐蔽迷雾中</span>`;
+
+        return `
+          <tr>
+            <td><b style="color:#FCA5A5;">${u.id}</b></td>
+            <td><span class="tag tag-tank">${u.name || '敌军'}</span></td>
+            <td>(${Math.round(u.x)}, ${Math.round(u.y)})</td>
+            <td>
+              <div class="hp-bar-bg"><div class="hp-bar-fill" style="width:${hpPct}%; background:#EF4444;"></div></div>
+              ${u.health}/${u.max_health}
+            </td>
+            <td>${ammoStr}</td>
+            <td>${u.vision_size === -1 ? '全图' : u.vision_size}</td>
+            <td>${Math.round(u.visibility * 100)}%</td>
+            <td>${spottedTag}</td>
+            <td>${u.tactic || 'patrol'}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+  </script>
+</body>
+</html>

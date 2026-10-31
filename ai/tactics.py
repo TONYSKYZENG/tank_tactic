@@ -139,8 +139,24 @@ class ChargeBaseTactic(BaseTactic):
         self.direction_lock = 25
 
     def decide(self, tank: Tank, physics_engine, game_map: GameMap) -> Tuple[Optional[Direction], bool]:
-        base_x = game_map.pixel_width / 2.0
-        base_y = game_map.pixel_height - game_map.tile_size
+        # 锁定我方的核心防御塔 (原鹰巢基地)
+        target_tower = None
+        for pt in physics_engine.player_tanks:
+            if pt.alive and pt.is_tower and pt.tower_type == "supply":
+                target_tower = pt
+                break
+        if not target_tower:
+            for pt in physics_engine.player_tanks:
+                if pt.alive and pt.is_tower:
+                    target_tower = pt
+                    break
+
+        if target_tower:
+            base_x = target_tower.x + target_tower.size / 2.0
+            base_y = target_tower.y + target_tower.size / 2.0
+        else:
+            base_x = game_map.pixel_width / 2.0
+            base_y = game_map.pixel_height - game_map.tile_size
 
         should_fire = False
 

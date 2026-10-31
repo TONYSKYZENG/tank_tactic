@@ -111,10 +111,11 @@ class MainWindow(QMainWindow):
 
         self.micro_label.setText(f"[{micro_id} | {ammo_str} | 战术:{micro_tactic} | {clr_str}]")
 
-        if not base_alive or alive_p <= 0:
+        if status.get("game_over", False):
             self.hud_label.setStyleSheet("color: #E74C3C;")
-        elif enemies == 0:
+            self.hud_label.setText(f"GAME OVER: {status.get('defeat_desc', '作战失败')} (按 R 重开)")
+        elif status.get("game_victory", False):
             self.hud_label.setStyleSheet("color: #F1C40F;")
-            self.hud_label.setText(f"★ 战役大捷！全歼敌方装甲师！ | 要塞: {base_str}")
+            self.hud_label.setText(f"★ 战役大捷！{status.get('victory_desc', '达成作战目标')} (按 R 重开)")
         else:
             self.hud_label.setStyleSheet("color: #4AF626;")

@@ -62,5 +62,7 @@ class MissionLoader:
             enemies=enemies_info,
             player_units=player_units,
             fog_of_war=fog_of_war,
-            limited_ammo=limited_ammo
+            limited_ammo=limited_ammo,
+            victory_conditions=data.get("victory_conditions", None),
+            defeat_conditions=data.get("defeat_conditions", None)
         )

@@ -375,10 +375,10 @@
       const baseStr = baseAlive ? "安全" : "失守!";
 
       if (status.game_over) {
-        hudStatus.innerText = `GAME OVER - 鹰巢失守或全军覆灭`;
+        hudStatus.innerText = `GAME OVER - ` + (status.defeat_desc || "作战失败") + " (按 R 重新开始)";
         hudStatus.style.color = "#E74C3C";
       } else if (status.game_victory) {
-        hudStatus.innerText = `★ 战役大捷！全歼敌方装甲师！`;
+        hudStatus.innerText = `★ 战役大捷！` + (status.victory_desc || "达成作战目标") + " (按 R 重新开始)";
         hudStatus.style.color = "#F1C40F";
       } else {
         hudStatus.innerText = `我方:${aliveP} | 选中:${selected} | ${enemyStr} | 鹰巢:${baseStr}`;

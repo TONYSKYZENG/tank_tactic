@@ -59,6 +59,11 @@ tanks_tactic/
 │   ├── enemy_fast.json           # 敌军突击轻坦
 │   └── enemy_heavy.json          # 敌军重装坦克
 │
+├── conditions/                   # 🎯 获胜与失败条件判定系统 (与或非组合逻辑/原语求值)
+│   ├── __init__.py
+│   ├── primitives.py             # 核心条件原语 (存活时间/单位被摧毁/区域可见)
+│   ├── composite.py              # 逻辑组合节点 (AndCondition/OrCondition/NotCondition)
+│   └── builder.py                # JSON 配置递归 AST 构建器
 ├── grouping/                     # 🛡️ 编组与选择管理模块 (单选/框选/Tab微操切换)
 ├── command/                      # 📡 指挥调度与战术系统 (GuardUnit 护卫/自动开路)
 ├── ai/                           # 🤖 敌军战术行为模块
@@ -114,6 +119,75 @@ python3 tanks.py --web
 python3 tanks.py --monitor-host 0.0.0.0 --monitor-port 9999
 ```
 此时辅助监控将在 `http://0.0.0.0:9999` 启动。
+
+---
+
+## 🎯 任务获胜与失败条件配置（与或非组合逻辑）
+
+在 `missions/*.json` 任务配置中，可以通过 `victory_conditions` 与 `defeat_conditions` 字段自由定义胜负判定规则。系统支持递归的 **与 (and)**、**或 (or)**、**非 (not)** 组合逻辑，并提供 3 个核心原语：
+
+1. **特定单位存活超过特定时间 (`unit_survive_time`)**：
+   - 字段：`unit_id`（目标单位 ID），`seconds`（存活累计秒数）。单位在达到指定累计存活时间且仍存活时满足。
+2. **特定单位被摧毁 (`unit_destroyed`)**：
+   - 字段：`unit_id`（目标单位 ID）。该单位死亡或已被消灭时满足。
+3. **特定区域可见 (`area_visible`)**：
+   - 字段：`tile_x, tile_y, tile_w, tile_h`（瓦片坐标与宽高，自动换算为 32px 网格）或 `area: [x, y, w, h]`（像素坐标矩形）。目标区域与我方单位视线相交或战场迷雾解除时满足。
+
+### 示例配置 (`missions/mission_01.json`)：
+
+```json
+{
+  "victory_conditions": {
+    "or": [
+      {
+        "and": [
+          {
+            "type": "unit_survive_time",
+            "unit_id": "core_supply_base",
+            "seconds": 30.0
+          },
+          {
+            "type": "area_visible",
+            "tile_x": 0,
+            "tile_y": 0,
+            "tile_w": 4,
+            "tile_h": 4
+          }
+        ]
+      },
+      {
+        "and": [
+          {
+            "type": "unit_destroyed",
+            "unit_id": "e_hunter_1"
+          },
+          {
+            "type": "unit_destroyed",
+            "unit_id": "e_fast_1"
+          },
+          {
+            "not": {
+              "type": "unit_destroyed",
+              "unit_id": "player_alpha"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "defeat_conditions": {
+    "or": [
+      {
+        "type": "unit_destroyed",
+        "unit_id": "core_supply_base"
+      },
+      {
+        "type": "all_players_destroyed"
+      }
+    ]
+  }
+}
+```
 
 ---
 

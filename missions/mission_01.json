@@ -101,5 +101,54 @@
       "ammo": -1,
       "visibility": 0.85
     }
-  ]
+  ],
+  "victory_conditions": {
+    "or": [
+      {
+        "and": [
+          {
+            "type": "unit_survive_time",
+            "unit_id": "core_supply_base",
+            "seconds": 30.0
+          },
+          {
+            "type": "area_visible",
+            "tile_x": 0,
+            "tile_y": 0,
+            "tile_w": 4,
+            "tile_h": 4
+          }
+        ]
+      },
+      {
+        "and": [
+          {
+            "type": "unit_destroyed",
+            "unit_id": "e_hunter_1"
+          },
+          {
+            "type": "unit_destroyed",
+            "unit_id": "e_fast_1"
+          },
+          {
+            "not": {
+              "type": "unit_destroyed",
+              "unit_id": "player_alpha"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "defeat_conditions": {
+    "or": [
+      {
+        "type": "unit_destroyed",
+        "unit_id": "core_supply_base"
+      },
+      {
+        "type": "all_players_destroyed"
+      }
+    ]
+  }
 }

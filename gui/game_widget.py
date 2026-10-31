@@ -13,6 +13,14 @@ from ai.controller import EnemyAIController
 from grouping.selection import SelectionManager
 from command.dispatcher import CommandDispatcher
 from command.tactics_mode import TacticMode
+from conditions import (
+    ConditionContext,
+    ConditionBuilder,
+    AllEnemiesDestroyedCondition,
+    AllPlayersDestroyedCondition,
+    OrCondition,
+    UnitDestroyedCondition
+)
 from .renderer import PixelRenderer
 
 class GameCanvasWidget(QWidget):
@@ -63,6 +71,9 @@ class GameCanvasWidget(QWidget):
         # 初始化玩家与敌军
         self._setup_mission_entities()
 
+        # 初始化胜负判定系统
+        self._setup_conditions()
+
         if self.physics_engine.player_tanks:
             first_tank = self.physics_engine.player_tanks[0]
             self.selection_mgr.select_single(first_tank)
@@ -73,6 +84,44 @@ class GameCanvasWidget(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._game_loop)
         self.timer.start(16)
+
+    def _setup_conditions(self):
+        self.condition_ctx = ConditionContext(self.physics_engine, self.game_map)
+
+        # 获胜条件构建
+        if self.mission.victory_conditions:
+            self.victory_condition = ConditionBuilder.build(self.mission.victory_conditions)
+        else:
+            self.victory_condition = AllEnemiesDestroyedCondition()
+
+        # 失败条件构建
+        if self.mission.defeat_conditions:
+            self.defeat_condition = ConditionBuilder.build(self.mission.defeat_conditions)
+        else:
+            defeat_subs = [AllPlayersDestroyedCondition()]
+            for t in self.physics_engine.player_tanks:
+                if t.is_tower and t.tower_type == "supply":
+                    defeat_subs.append(UnitDestroyedCondition(t.id))
+            self.defeat_condition = OrCondition(defeat_subs)
+
+    def restart(self):
+        self.game_over = False
+        self.game_victory = False
+        self.active_keys.clear()
+        self.is_dragging_box = False
+        self.command_marker = None
+        self.physics_engine = PhysicsEngine(
+            self.game_map,
+            fog_of_war_enabled=self.mission.fog_of_war,
+            limited_ammo_enabled=self.mission.limited_ammo
+        )
+        self.ai_controller = EnemyAIController(self.physics_engine, self.game_map)
+        self.selection_mgr = SelectionManager()
+        self.command_dispatcher = CommandDispatcher()
+        self._setup_mission_entities()
+        self._setup_conditions()
+        if self.physics_engine.player_tanks:
+            self.selection_mgr.select_single(self.physics_engine.player_tanks[0])
 
     def _setup_mission_entities(self):
         tile_size = self.game_map.tile_size
@@ -260,6 +309,8 @@ class GameCanvasWidget(QWidget):
             elif key == Qt.Key_S:
                 selected = self.selection_mgr.get_selected()
                 self.command_dispatcher.issue_stop(selected)
+            elif key == Qt.Key_R and (self.game_over or self.game_victory):
+                self.restart()
 
         event.accept()
 
@@ -314,10 +365,10 @@ class GameCanvasWidget(QWidget):
         alive_enemies = [e for e in self.physics_engine.enemy_tanks if e.alive]
         visible_enemies = self.physics_engine.get_visible_enemies()
 
-        # 核心要塞被毁或我方全军覆没 -> 失败
-        if not base_alive or not alive_players:
+        # 基于条件树求值胜负逻辑
+        if self.defeat_condition.evaluate(self.condition_ctx):
             self.game_over = True
-        elif not alive_enemies:
+        elif self.victory_condition.evaluate(self.condition_ctx):
             self.game_victory = True
 
         micro = self.selection_mgr.get_micro_tank()
@@ -339,11 +390,16 @@ class GameCanvasWidget(QWidget):
             "fog_enabled": self.physics_engine.fog_of_war_enabled,
             "limited_ammo_enabled": self.physics_engine.limited_ammo_enabled,
             "game_over": self.game_over,
-            "game_victory": self.game_victory
+            "game_victory": self.game_victory,
+            "victory_desc": self.victory_condition.get_description(),
+            "defeat_desc": self.defeat_condition.get_description()
         })
 
     def _game_loop(self):
         if not self.game_over and not self.game_victory:
+            # 推进胜负条件计时上下文 (假设每步按约 16ms 步进)
+            self.condition_ctx.update(0.016)
+
             has_manual_input = self._process_micro_tank_input()
             self.command_dispatcher.update(
                 self.physics_engine.player_tanks,
@@ -429,12 +485,12 @@ class GameCanvasWidget(QWidget):
         if self.game_over:
             painter.fillRect(self.rect(), QColor(0, 0, 0, 160))
             painter.setPen(QPen(QColor("#E74C3C")))
-            painter.setFont(QFont("Courier New", 30, QFont.Bold))
-            painter.drawText(self.rect(), Qt.AlignCenter, "GAME OVER\n[鹰巢失守或全军覆没]")
+            painter.setFont(QFont("Courier New", 20, QFont.Bold))
+            painter.drawText(self.rect(), Qt.AlignCenter, f"GAME OVER\n[{self.defeat_condition.get_description()}]\n(按 R 键重开)")
         elif self.game_victory:
             painter.fillRect(self.rect(), QColor(0, 0, 0, 160))
             painter.setPen(QPen(QColor("#2ECC71")))
-            painter.setFont(QFont("Courier New", 30, QFont.Bold))
-            painter.drawText(self.rect(), Qt.AlignCenter, "VICTORY!\n[敌军全灭，大获全胜]")
+            painter.setFont(QFont("Courier New", 20, QFont.Bold))
+            painter.drawText(self.rect(), Qt.AlignCenter, f"VICTORY!\n[{self.victory_condition.get_description()}]\n(按 R 键重开)")
 
         painter.end()

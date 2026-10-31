@@ -33,3 +33,5 @@ class Mission:
     player_units: List[PlayerMissionInfo] = field(default_factory=list)
     fog_of_war: bool = True     # 是否启用战争迷雾系统
     limited_ammo: bool = True   # 是否启用有限弹药系统
+    victory_conditions: Optional[Any] = None  # 获胜条件表达式（支持与或非及原语）
+    defeat_conditions: Optional[Any] = None   # 失败条件表达式（支持与或非及原语）

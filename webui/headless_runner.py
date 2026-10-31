@@ -14,6 +14,14 @@ from grouping.selection import SelectionManager
 from command.dispatcher import CommandDispatcher
 from command.tactics_mode import TacticMode
 from gui.renderer import PixelRenderer
+from conditions import (
+    ConditionContext,
+    ConditionBuilder,
+    AllEnemiesDestroyedCondition,
+    AllPlayersDestroyedCondition,
+    OrCondition,
+    UnitDestroyedCondition
+)
 
 class HeadlessGameRunner(QObject):
     """
@@ -52,12 +60,30 @@ class HeadlessGameRunner(QObject):
         self.game_victory = False
 
         self._setup_mission_entities()
+        self._setup_conditions()
 
         if self.physics_engine.player_tanks:
             self.selection_mgr.select_single(self.physics_engine.player_tanks[0])
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._step)
+
+    def _setup_conditions(self):
+        self.condition_ctx = ConditionContext(self.physics_engine, self.game_map)
+
+        if self.mission.victory_conditions:
+            self.victory_condition = ConditionBuilder.build(self.mission.victory_conditions)
+        else:
+            self.victory_condition = AllEnemiesDestroyedCondition()
+
+        if self.mission.defeat_conditions:
+            self.defeat_condition = ConditionBuilder.build(self.mission.defeat_conditions)
+        else:
+            defeat_subs = [AllPlayersDestroyedCondition()]
+            for t in self.physics_engine.player_tanks:
+                if t.is_tower and t.tower_type == "supply":
+                    defeat_subs.append(UnitDestroyedCondition(t.id))
+            self.defeat_condition = OrCondition(defeat_subs)
 
     def start(self):
         self.timer.start(16)
@@ -277,6 +303,7 @@ class HeadlessGameRunner(QObject):
         self.selection_mgr = SelectionManager()
         self.command_dispatcher = CommandDispatcher()
         self._setup_mission_entities()
+        self._setup_conditions()
         if self.physics_engine.player_tanks:
             self.selection_mgr.select_single(self.physics_engine.player_tanks[0])
 
@@ -295,9 +322,10 @@ class HeadlessGameRunner(QObject):
         alive_enemies = [e for e in self.physics_engine.enemy_tanks if e.alive]
         visible_enemies = self.physics_engine.get_visible_enemies()
 
-        if not base_alive or not alive_players:
+        # 胜负条件动态求值
+        if self.defeat_condition.evaluate(self.condition_ctx):
             self.game_over = True
-        elif not alive_enemies:
+        elif self.victory_condition.evaluate(self.condition_ctx):
             self.game_victory = True
 
         micro = self.selection_mgr.get_micro_tank()
@@ -320,6 +348,8 @@ class HeadlessGameRunner(QObject):
             "limited_ammo_enabled": self.physics_engine.limited_ammo_enabled,
             "game_over": self.game_over,
             "game_victory": self.game_victory,
+            "victory_desc": self.victory_condition.get_description(),
+            "defeat_desc": self.defeat_condition.get_description(),
             "mission_name": self.mission.name
         }
 
@@ -372,13 +402,13 @@ class HeadlessGameRunner(QObject):
         if self.game_over:
             painter.fillRect(self.render_image.rect(), QColor(0, 0, 0, 160))
             painter.setPen(QPen(QColor("#E74C3C")))
-            painter.setFont(QFont("Courier New", 28, QFont.Bold))
-            painter.drawText(self.render_image.rect(), Qt.AlignCenter, "GAME OVER\n[按 R 重新挑战]")
+            painter.setFont(QFont("Courier New", 20, QFont.Bold))
+            painter.drawText(self.render_image.rect(), Qt.AlignCenter, f"GAME OVER\n[{self.defeat_condition.get_description()}]\n[按 R 重新挑战]")
         elif self.game_victory:
             painter.fillRect(self.render_image.rect(), QColor(0, 0, 0, 160))
             painter.setPen(QPen(QColor("#2ECC71")))
-            painter.setFont(QFont("Courier New", 28, QFont.Bold))
-            painter.drawText(self.render_image.rect(), Qt.AlignCenter, "VICTORY!\n[全歼敌军，大获全胜]")
+            painter.setFont(QFont("Courier New", 20, QFont.Bold))
+            painter.drawText(self.render_image.rect(), Qt.AlignCenter, f"VICTORY!\n[{self.victory_condition.get_description()}]\n[按 R 重新挑战]")
 
         painter.end()
 
@@ -389,6 +419,8 @@ class HeadlessGameRunner(QObject):
 
     def _step(self):
         if not self.game_over and not self.game_victory:
+            self.condition_ctx.update(0.016)
+
             has_manual_input = self._process_micro_tank_input()
             self.command_dispatcher.update(
                 self.physics_engine.player_tanks,

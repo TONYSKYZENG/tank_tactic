@@ -8,5 +8,10 @@
   "bullet_size": 12,
   "bullet_color": "#FFFFFF",
   "fire_cooldown": 15,
-  "health": 3
+  "health": 3,
+  "converter_table": [
+    "recipe_dm_to_alloy",
+    "recipe_alloy_to_dm",
+    "recipe_hyper_fusion"
+  ]
 }

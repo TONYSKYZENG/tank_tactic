@@ -1,0 +1,13 @@
+{
+  "id": "recipe_hyper_fusion",
+  "name": "converter.recipe.hyper_fusion",
+  "inputs": {
+    "dark_matter": 20.0,
+    "alloy": 15.0
+  },
+  "outputs": {
+    "dark_matter": 35.0,
+    "alloy": 25.0
+  },
+  "duration": 6.0
+}

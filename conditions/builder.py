@@ -6,7 +6,8 @@ from conditions.primitives import (
     UnitDestroyedCondition,
     AreaVisibleCondition,
     AllEnemiesDestroyedCondition,
-    AllPlayersDestroyedCondition
+    AllPlayersDestroyedCondition,
+    ResourceAmountCondition
 )
 from conditions.composite import (
     AndCondition,
@@ -95,6 +96,13 @@ class ConditionBuilder:
         elif cond_type in ("area_visible", "scout_area", "area_scouted"):
             rect = cls._parse_rect(config)
             return AreaVisibleCondition(rect)
+
+        # 经济原语: resource_amount
+        elif cond_type in ("resource_amount", "resource", "has_resource"):
+            res_type = str(config.get("resource_type", config.get("resource", "dark_matter")))
+            amt = float(config.get("amount", config.get("count", 100.0)))
+            camp = str(config.get("camp", "player"))
+            return ResourceAmountCondition(res_type, amt, camp=camp)
 
         # 扩展通用原语
         elif cond_type == "all_enemies_destroyed":

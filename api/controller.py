@@ -114,6 +114,20 @@ class GameAPIController:
         elif action in ("find_path", "path"):
             return self.find_path(params)
 
+        # 7. 经济系统、配方转换与资源开采
+        elif action in ("convert", "start_convert"):
+            return self.convert(params)
+        elif action in ("terminate_convert", "cancel_convert", "clear_convert"):
+            return self.terminate_convert(params)
+        elif action in ("get_resources", "resources", "list_resources"):
+            return self.get_resources(params)
+        elif action in ("harvest", "start_harvest", "command_harvest"):
+            return self.command_harvest(params)
+        elif action in ("stop_harvest", "command_stop_harvest", "cancel_harvest"):
+            return self.command_stop_harvest(params)
+        elif action in ("list_resource_blocks", "get_resource_blocks", "resource_blocks"):
+            return self.list_resource_blocks(params)
+
         # 辅助探针
         elif action in ("ping", "hello"):
             return {"status": "ok", "message": "pong"}
@@ -720,7 +734,14 @@ class GameAPIController:
             "can_crush_bricks": getattr(target_tank, "can_crush_bricks", False),
             "auto_clear": auto_clr,
             "controllable": getattr(target_tank, "controllable", True),
-            "ai_script": getattr(target_tank, "ai_script", None)
+            "ai_script": getattr(target_tank, "ai_script", None),
+            "converter_table": list(getattr(target_tank, "converter_table", [])),
+            "is_converting": getattr(target_tank, "is_converting", False),
+            "converter_status": target_tank.converter.get_status_dict() if getattr(target_tank, "converter", None) else None,
+            "harvest_speed": dict(getattr(target_tank, "harvest_speed", {})),
+            "is_harvesting": getattr(target_tank, "is_harvesting", False),
+            "harvest_target": getattr(target_tank, "harvest_target", None),
+            "harvest_state": getattr(target_tank, "harvest_state", "idle")
         }
 
         return {
@@ -842,3 +863,234 @@ class GameAPIController:
             "ammo_needed": ammo_needed,
             "step_count": len(path)
         }
+
+    # ================= 7. 经济系统与转换器 API =================
+
+    def convert(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        开始或向指定单位追加配方转换任务
+        :param unit_id: 单位 ID (必填)
+        :param recipe_id: 配方 ID (必填)
+        :param count: 转换批次数 (选填，默认 1)
+        """
+        unit_id = str(params.get("unit_id", "")).strip()
+        recipe_id = str(params.get("recipe_id", "")).strip()
+        count = int(params.get("count", 1))
+
+        if not unit_id:
+            return {"status": "error", "error": "Missing 'unit_id' parameter"}
+        if not recipe_id:
+            return {"status": "error", "error": "Missing 'recipe_id' parameter"}
+
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        tank = None
+        for t in physics.player_tanks + physics.enemy_tanks:
+            if t.id == unit_id:
+                tank = t
+                break
+
+        if tank is None or not tank.alive:
+            return {"status": "error", "error": f"Unit '{unit_id}' not found or is dead"}
+
+        if not getattr(tank, "converter", None):
+            return {"status": "error", "error": f"Unit '{unit_id}' has no converter equipped"}
+
+        from converter.loader import RecipeRegistry
+        recipe = RecipeRegistry.get(recipe_id)
+        if recipe is None:
+            return {"status": "error", "error": f"Recipe '{recipe_id}' does not exist"}
+
+        if not tank.converter.supports_recipe(recipe_id):
+            return {"status": "error", "error": f"Unit '{unit_id}' does not support recipe '{recipe_id}'"}
+
+        res_mgr = getattr(self.game_context, "resource_manager", None)
+        if not res_mgr:
+            return {"status": "error", "error": "No resource manager available"}
+
+        ok, reason = tank.converter.enqueue(recipe, count, res_mgr)
+        if not ok:
+            return {"status": "error", "error": f"Failed to enqueue conversion: {reason}"}
+
+        return {
+            "status": "ok",
+            "unit_id": unit_id,
+            "recipe_id": recipe_id,
+            "count": count,
+            "result": reason,
+            "is_converting": tank.is_converting
+        }
+
+    def terminate_convert(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        终止并清空转换队列
+        :param unit_id: 可选。指定单位 ID 则仅终止该单位；缺省则清空全员所有转换队列
+        """
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        unit_id = params.get("unit_id")
+        if unit_id:
+            unit_id = str(unit_id).strip()
+            found = False
+            for t in physics.player_tanks + physics.enemy_tanks:
+                if t.id == unit_id:
+                    if t.converter:
+                        t.converter.terminate()
+                    found = True
+                    break
+            if not found:
+                return {"status": "error", "error": f"Unit '{unit_id}' not found"}
+            return {"status": "ok", "message": f"Conversion terminated for unit '{unit_id}'"}
+        else:
+            for t in physics.player_tanks + physics.enemy_tanks:
+                if t.converter:
+                    t.converter.terminate()
+            return {"status": "ok", "message": "All conversion queues terminated"}
+
+    def get_resources(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """查询当前拥有的所有各类资源储备及每秒产出速率（支持按阵营查询）"""
+        res_mgr = getattr(self.game_context, "resource_manager", None)
+        if not res_mgr:
+            return {"status": "ok", "resources": {}, "rates": {}, "all_camps": {}}
+
+        camp = params.get("camp", "player")
+        caller_id = params.get("_caller_unit_id")
+        if caller_id and "camp" not in params:
+            physics = getattr(self.game_context, "physics_engine", None)
+            if physics:
+                for t in physics.player_tanks + physics.enemy_tanks:
+                    if t.id == caller_id:
+                        camp = t.camp.value if hasattr(t.camp, "value") else str(t.camp)
+                        break
+
+        return {
+            "status": "ok",
+            "camp": str(camp),
+            "resources": res_mgr.get_all_resources(camp=camp),
+            "rates": res_mgr.get_rates(),
+            "all_camps": res_mgr.get_both_stockpiles()
+        }
+
+    def command_harvest(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        命令指定单位开始开采地图上的资源块
+        :param unit_id: 单位 ID (若缺省则使用调用方 _caller_unit_id)
+        :param col: 资源块列号 (或由 x 像素自动换算)
+        :param row: 资源块行号 (或由 y 像素自动换算)
+        """
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        unit_id = params.get("unit_id") or params.get("_caller_unit_id")
+        if not unit_id:
+            unit_ids = params.get("unit_ids", [])
+            unit_id = unit_ids[0] if unit_ids else None
+
+        if not unit_id:
+            return {"status": "error", "error": "Missing 'unit_id' parameter"}
+
+        target_tank = None
+        for t in physics.player_tanks + physics.enemy_tanks:
+            if t.id == unit_id:
+                target_tank = t
+                break
+
+        if not target_tank or not target_tank.alive:
+            return {"status": "error", "error": f"Unit '{unit_id}' not found or is dead"}
+
+        game_map = getattr(self.game_context, "game_map", None)
+        tile_size = game_map.tile_size if game_map else 32
+
+        if "col" in params and "row" in params:
+            col = int(params["col"])
+            row = int(params["row"])
+        elif "x" in params and "y" in params:
+            px, py = float(params["x"]), float(params["y"])
+            col = int(px // tile_size)
+            row = int(py // tile_size)
+        else:
+            return {"status": "error", "error": "Missing 'col'/'row' or 'x'/'y' parameters for target resource block"}
+
+        res_mgr = getattr(self.game_context, "resource_manager", None)
+        block = res_mgr.get_block_at(col, row) if res_mgr else None
+        if not block:
+            return {"status": "error", "error": f"No resource block found at ({col}, {row})"}
+
+        all_tanks = physics.player_tanks + physics.enemy_tanks
+        in_range = block.is_in_harvest_range(target_tank, tile_size)
+        is_excl = block.is_exclusive(target_tank.camp, all_tanks, tile_size)
+
+        target_tank.start_harvest(col, row)
+
+        return {
+            "status": "ok",
+            "unit_id": unit_id,
+            "harvest_target": [col, row],
+            "resource_type": block.resource_type,
+            "in_range": in_range,
+            "is_exclusive": is_excl
+        }
+
+    def command_stop_harvest(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """停止单位的资源开采动作"""
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        unit_id = params.get("unit_id") or params.get("_caller_unit_id")
+        if unit_id:
+            for t in physics.player_tanks + physics.enemy_tanks:
+                if t.id == unit_id:
+                    t.stop_harvest()
+                    return {"status": "ok", "message": f"Harvest stopped for unit '{unit_id}'"}
+            return {"status": "error", "error": f"Unit '{unit_id}' not found"}
+        else:
+            for t in physics.player_tanks + physics.enemy_tanks:
+                t.stop_harvest()
+            return {"status": "ok", "message": "Harvest stopped for all units"}
+
+    def list_resource_blocks(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """列出地图上所有活跃资源块信息、储量与排他检测"""
+        res_mgr = getattr(self.game_context, "resource_manager", None)
+        if not res_mgr:
+            return {"status": "ok", "blocks": []}
+
+        physics = getattr(self.game_context, "physics_engine", None)
+        game_map = getattr(self.game_context, "game_map", None)
+        tile_size = game_map.tile_size if game_map else 32
+        all_tanks = (physics.player_tanks + physics.enemy_tanks) if physics else []
+
+        caller_id = params.get("unit_id") or params.get("_caller_unit_id")
+        caller_tank = None
+        if caller_id and physics:
+            for t in all_tanks:
+                if t.id == caller_id:
+                    caller_tank = t
+                    break
+
+        blocks_data = []
+        for b in res_mgr.blocks:
+            item = {
+                "col": b.col,
+                "row": b.row,
+                "x": round((b.col + 0.5) * tile_size, 1),
+                "y": round((b.row + 0.5) * tile_size, 1),
+                "resource_type": b.resource_type,
+                "current_amount": round(b.current_amount, 2),
+                "initial_amount": b.initial_amount,
+                "max_amount": b.max_amount,
+                "regen_rate": b.regen_rate,
+                "harvest_radius": b.harvest_radius,
+                "exclusive_radius": b.exclusive_radius
+            }
+            if caller_tank:
+                item["in_range"] = b.is_in_harvest_range(caller_tank, tile_size)
+                item["is_exclusive"] = b.is_exclusive(caller_tank.camp, all_tanks, tile_size)
+            blocks_data.append(item)
+
+        return {"status": "ok", "blocks": blocks_data}

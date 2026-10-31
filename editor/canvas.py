@@ -6,6 +6,7 @@ from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
 
 from map_loader.models import GameMap, TileType
 from mission_loader.models import PlayerMissionInfo, EnemyMissionInfo
+from resource.loader import ResourceLoader
 
 class EditorMode:
     MAP_EDIT = "map_edit"
@@ -41,6 +42,8 @@ class EditorCanvas(QWidget):
         self.mode = EditorMode.MAP_EDIT
         self.tool = TerrainTool.BRUSH
         self.selected_tile = TileType.BRICK
+        self.resource_configs = ResourceLoader.load_configs()
+        self.resource_tiles = {cfg.tile_id: cfg for cfg in self.resource_configs.values()}
 
         # 视图缩放与网格
         self.zoom = 1.0
@@ -371,6 +374,30 @@ class EditorCanvas(QWidget):
             painter.fillRect(QRectF(x + size - 2 - rivet_s, y + 2, rivet_s, rivet_s), QColor("#FFFFFF"))
             painter.fillRect(QRectF(x + 2, y + size - 2 - rivet_s, rivet_s, rivet_s), QColor("#FFFFFF"))
             painter.fillRect(QRectF(x + size - 2 - rivet_s, y + size - 2 - rivet_s, rivet_s, rivet_s), QColor("#FFFFFF"))
+        elif tile in self.resource_tiles:
+            # 动态 JSON 加载资源矿块 (按配置色彩与外边框渲染)
+            cfg = self.resource_tiles[tile]
+            base_color = QColor(cfg.color)
+            painter.fillRect(rect, base_color.darker(280))
+            painter.setPen(QPen(base_color, 1))
+            painter.drawRect(rect)
+            half = size / 2.0
+            painter.fillRect(QRectF(x + size * 0.25, y + size * 0.25, half, half), base_color)
+            painter.fillRect(QRectF(x + size * 0.38, y + size * 0.38, size * 0.24, size * 0.24), base_color.lighter(140))
+        elif tile == TileType.DARK_MATTER:
+            painter.fillRect(rect, QColor("#341143"))
+            painter.setPen(QPen(QColor("#8E44AD"), 1))
+            painter.drawRect(rect)
+            half = size / 2.0
+            painter.fillRect(QRectF(x + size * 0.25, y + size * 0.25, half, half), QColor("#A569BD"))
+            painter.fillRect(QRectF(x + size * 0.38, y + size * 0.38, size * 0.24, size * 0.24), QColor("#E8DAEF"))
+        elif tile == TileType.ALLOY:
+            painter.fillRect(rect, QColor("#1B2631"))
+            painter.setPen(QPen(QColor("#2980B9"), 1))
+            painter.drawRect(rect)
+            painter.fillRect(QRectF(x + 3, y + 3, size - 6, size - 6), QColor("#3498DB"))
+            painter.setPen(QPen(QColor("#AED6F1"), 1))
+            painter.drawLine(int(x + 3), int(y + size / 2.0), int(x + size - 3), int(y + size / 2.0))
         elif tile == TileType.BASE:
             # 金鹰基地核心
             painter.fillRect(rect, QColor("#D35400"))

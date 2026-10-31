@@ -47,10 +47,11 @@ def main():
     # 3. 准备只读监控状态获取句柄
     active_engine = None
     active_dispatcher = None
+    active_res_mgr = None
 
     def get_current_state():
         if active_engine and active_dispatcher:
-            return extract_game_state_snapshot(active_engine, game_map, active_dispatcher)
+            return extract_game_state_snapshot(active_engine, game_map, active_dispatcher, active_res_mgr)
         return {"status": "initializing"}
 
     # 4. 启动【永远在线】的辅助只读全知监控 WebUI (默认 0.0.0.0:8088)
@@ -79,6 +80,7 @@ def main():
         )
         active_engine = web_server.runner.physics_engine
         active_dispatcher = web_server.runner.command_dispatcher
+        active_res_mgr = web_server.runner.resource_manager
 
         # 启动三合一网络 API 服务
         api_manager = APIServerManager(
@@ -103,6 +105,7 @@ def main():
         window = MainWindow(mission=mission, game_map=game_map, base_dir=BASE_DIR)
         active_engine = window.canvas.physics_engine
         active_dispatcher = window.canvas.command_dispatcher
+        active_res_mgr = window.canvas.resource_manager
 
         # 启动三合一网络 API 服务
         api_manager = APIServerManager(

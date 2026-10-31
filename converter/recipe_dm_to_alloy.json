@@ -1,0 +1,11 @@
+{
+  "id": "recipe_dm_to_alloy",
+  "name": "converter.recipe.dm_to_alloy",
+  "inputs": {
+    "dark_matter": 10.0
+  },
+  "outputs": {
+    "alloy": 5.0
+  },
+  "duration": 4.0
+}

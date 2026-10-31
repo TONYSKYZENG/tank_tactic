@@ -1,0 +1,11 @@
+{
+  "resource_type": "dark_matter",
+  "name": "Dark Matter",
+  "tile_id": 3,
+  "initial_amount": 500,
+  "regen_rate": 2.0,
+  "max_amount": 5000,
+  "harvest_radius": 64.0,
+  "exclusive_radius": 96.0,
+  "color": "#8E44AD"
+}

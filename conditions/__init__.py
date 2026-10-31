@@ -5,7 +5,8 @@ from conditions.primitives import (
     UnitDestroyedCondition,
     AreaVisibleCondition,
     AllEnemiesDestroyedCondition,
-    AllPlayersDestroyedCondition
+    AllPlayersDestroyedCondition,
+    ResourceAmountCondition
 )
 from conditions.composite import (
     AndCondition,
@@ -23,6 +24,7 @@ __all__ = [
     "AreaVisibleCondition",
     "AllEnemiesDestroyedCondition",
     "AllPlayersDestroyedCondition",
+    "ResourceAmountCondition",
     "AndCondition",
     "OrCondition",
     "NotCondition",

@@ -22,6 +22,10 @@ class PixelRenderer:
                     PixelRenderer._draw_brick_tile(painter, x, y, tile_size)
                 elif tile == TileType.STEEL:
                     PixelRenderer._draw_steel_tile(painter, x, y, tile_size)
+                elif tile == TileType.DARK_MATTER:
+                    PixelRenderer._draw_dark_matter_tile(painter, x, y, tile_size)
+                elif tile == TileType.ALLOY:
+                    PixelRenderer._draw_alloy_tile(painter, x, y, tile_size)
                 elif tile == TileType.BASE:
                     PixelRenderer._draw_base_tile(painter, x, y, tile_size)
 
@@ -68,6 +72,53 @@ class PixelRenderer:
         painter.fillRect(QRectF(x + margin, y + margin, core_size, core_size), QColor("#D4AF37"))
         sub = size * 0.35
         painter.fillRect(QRectF(x + sub, y + sub, size - sub * 2, size - sub * 2), QColor("#E74C3C"))
+
+    @staticmethod
+    def _draw_dark_matter_tile(painter: QPainter, x: float, y: float, size: float) -> None:
+        # 暗物质神秘矿块：深暗紫色基底 + 晶体切面 + 霓虹晶核
+        painter.fillRect(QRectF(x, y, size, size), QColor("#1A092A"))
+        half = size / 2.0
+        quarter = size / 4.0
+
+        # 外围水晶切面
+        painter.fillRect(QRectF(x + 2, y + 2, half - 3, half - 3), QColor("#4A235A"))
+        painter.fillRect(QRectF(x + half + 1, y + 2, half - 3, half - 3), QColor("#5B2C6F"))
+        painter.fillRect(QRectF(x + 2, y + half + 1, half - 3, half - 3), QColor("#6C3483"))
+        painter.fillRect(QRectF(x + half + 1, y + half + 1, half - 3, half - 3), QColor("#512E5F"))
+
+        # 核心晶核脉冲菱形
+        painter.fillRect(QRectF(x + quarter, y + quarter, half, half), QColor("#8E44AD"))
+        inner_m = size * 0.35
+        painter.fillRect(QRectF(x + inner_m, y + inner_m, size - inner_m * 2, size - inner_m * 2), QColor("#D2B4DE"))
+
+        # 高光晶体棱线
+        pen_glow = QPen(QColor("#BB8FCE"), 1)
+        painter.setPen(pen_glow)
+        painter.drawLine(int(x + 2), int(y + 2), int(x + size - 2), int(y + 2))
+        painter.drawLine(int(x + 2), int(y + 2), int(x + 2), int(y + size - 2))
+
+    @staticmethod
+    def _draw_alloy_tile(painter: QPainter, x: float, y: float, size: float) -> None:
+        # 合金工业装甲矿块：科技金属蓝 + 铆钉防滑纹 + 高科铭板
+        painter.fillRect(QRectF(x, y, size, size), QColor("#1B2631"))
+        half = size / 2.0
+        # 金属防弹板
+        painter.fillRect(QRectF(x + 2, y + 2, size - 4, size - 4), QColor("#2874A6"))
+        painter.fillRect(QRectF(x + 5, y + 5, size - 10, size - 10), QColor("#3498DB"))
+
+        # 强化棱条与铆钉
+        pen_line = QPen(QColor("#85C1E9"), 1)
+        painter.setPen(pen_line)
+        painter.drawLine(int(x + 5), int(y + half), int(x + size - 5), int(y + half))
+        painter.drawLine(int(x + half), int(y + 5), int(x + half), int(y + size - 5))
+
+        # 4角高科铆钉
+        pen_dot = QPen(QColor("#EBF5FB"), 2)
+        painter.setPen(pen_dot)
+        painter.drawPoint(int(x + 6), int(y + 6))
+        painter.drawPoint(int(x + size - 6), int(y + 6))
+        painter.drawPoint(int(x + 6), int(y + size - 6))
+        painter.drawPoint(int(x + size - 6), int(y + size - 6))
 
     @staticmethod
     def draw_tank(painter: QPainter, tank: Tank, is_selected: bool = False,
@@ -132,6 +183,40 @@ class PixelRenderer:
             painter.setFont(QFont("Courier New", 8, QFont.Bold))
             painter.setPen(QPen(QColor("#E67E22")))
             painter.drawText(QRectF(x - 10, y - 12, size + 20, 10), Qt.AlignCenter, "[开路]")
+
+        if getattr(tank, "is_converting", False):
+            painter.setFont(QFont("Courier New", 8, QFont.Bold))
+            painter.setPen(QPen(QColor("#00E5FF")))
+            painter.drawText(QRectF(x - 25, y - 26 if is_micro else y - 14, size + 50, 12), Qt.AlignCenter, "[⚙CONVERT]")
+        elif getattr(tank, "is_harvesting", False):
+            h_state = getattr(tank, "harvest_state", "harvesting")
+            painter.setFont(QFont("Courier New", 8, QFont.Bold))
+            if h_state == "contested":
+                painter.setPen(QPen(QColor("#E74C3C")))
+                tag = "[⚡争夺]"
+            elif h_state == "out_of_range":
+                painter.setPen(QPen(QColor("#F39C12")))
+                tag = "[超距]"
+            elif h_state == "depleted":
+                painter.setPen(QPen(QColor("#7F8C8D")))
+                tag = "[枯竭]"
+            else:
+                painter.setPen(QPen(QColor("#F1C40F")))
+                tag = "[⛏采集]"
+            painter.drawText(QRectF(x - 25, y - 26 if is_micro else y - 14, size + 50, 12), Qt.AlignCenter, tag)
+
+            # 绘制开采牵引光束到目标资源块
+            if h_state == "harvesting" and getattr(tank, "harvest_target", None):
+                target = tank.harvest_target
+                ts = 32.0
+                bx = (target[0] + 0.5) * ts
+                by = (target[1] + 0.5) * ts
+                tcx = x + size / 2.0
+                tcy = y + size / 2.0
+                painter.save()
+                painter.setPen(QPen(QColor(0, 229, 255, 160), 2, Qt.DashLine))
+                painter.drawLine(int(tcx), int(tcy), int(bx), int(by))
+                painter.restore()
 
         # 3. 品字形方块（支持自由旋转角度）
         painter.save()

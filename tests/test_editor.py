@@ -63,6 +63,15 @@ class TestEditorComponents(unittest.TestCase):
             for c in range(2, 5):
                 self.assertEqual(canvas.game_map.grid[r][c], TileType.STEEL)
 
+        # Test Dark Matter and Alloy resource tile painting
+        canvas.set_tile_type(TileType.DARK_MATTER)
+        canvas.apply_brush_at_pixel(32, 32)
+        self.assertEqual(canvas.game_map.grid[1][1], TileType.DARK_MATTER)
+
+        canvas.set_tile_type(TileType.ALLOY)
+        canvas.apply_brush_at_pixel(64, 64)
+        self.assertEqual(canvas.game_map.grid[2][2], TileType.ALLOY)
+
     def test_map_editor_widget(self):
         canvas = EditorCanvas(self.game_map)
         map_widget = MapEditorWidget(canvas)
@@ -133,7 +142,8 @@ class TestEditorComponents(unittest.TestCase):
             "type": "and",
             "children": [
                 {"type": "all_enemies_destroyed"},
-                {"type": "unit_survive_time", "unit_id": "player_1", "duration": 30.0}
+                {"type": "unit_survive_time", "unit_id": "player_1", "duration": 30.0},
+                {"type": "resource_amount", "resource_type": "dark_matter", "amount": 250.0}
             ]
         }
         def_config = {
@@ -144,10 +154,12 @@ class TestEditorComponents(unittest.TestCase):
         # Serialize back from tree
         exported_vic, exported_def = cond_widget.export_conditions()
         self.assertIn("and", exported_vic)
-        self.assertEqual(len(exported_vic["and"]), 2)
+        self.assertEqual(len(exported_vic["and"]), 3)
         self.assertEqual(exported_vic["and"][0]["type"], "all_enemies_destroyed")
         self.assertEqual(exported_vic["and"][1]["type"], "unit_survive_time")
         self.assertEqual(exported_vic["and"][1]["duration"], 30.0)
+        self.assertEqual(exported_vic["and"][2]["type"], "resource_amount")
+        self.assertEqual(exported_vic["and"][2]["amount"], 250.0)
         self.assertEqual(exported_def["type"], "all_players_destroyed")
 
         # Validate with game's ConditionBuilder
@@ -185,6 +197,50 @@ class TestEditorComponents(unittest.TestCase):
         self.assertIsNone(window.current_mission_path)
         self.assertEqual(window.stack.currentIndex(), 1)  # Automatically jumps to Mission Mode
         self.assertEqual(window.mission_editor.edit_mission_name.text(), "New Campaign Mission")
+
+    def test_dynamic_resource_palette_and_initial_resources_dropdown(self):
+        """测试要求 2 & 3：地图编辑器从 JSON 动态读取资源块，以及任务编辑器敌我双方初始资源下拉编辑"""
+        canvas = EditorCanvas(self.game_map)
+        map_widget = MapEditorWidget(canvas)
+
+        # 1. 验证地图编辑器瓦片面板并非写死，而是动态包含 resource/*.json 中定义的所有资源
+        resource_types_in_palette = [info[2] for info in map_widget.tiles_info]
+        self.assertIn("dark_matter", resource_types_in_palette)
+        self.assertIn("alloy", resource_types_in_palette)
+        self.assertIn("brick", resource_types_in_palette)
+        self.assertIn("steel", resource_types_in_palette)
+
+        # 2. 任务编辑器初始资源下拉列表编辑验证
+        mission_widget = MissionEditorWidget(canvas)
+        mission_widget.create_new_mission()
+
+        # 初始我方资源
+        self.assertEqual(mission_widget.player_initial_resources.get("dark_matter"), 100.0)
+        self.assertEqual(mission_widget.player_initial_resources.get("alloy"), 50.0)
+
+        # 切换到敌方 (索引 1) 并修改暗物质
+        mission_widget.combo_res_camp.setCurrentIndex(1)  # 敌方
+        # 选择 dark_matter
+        dm_idx = mission_widget.combo_res_type.findData("dark_matter")
+        if dm_idx != -1:
+            mission_widget.combo_res_type.setCurrentIndex(dm_idx)
+        mission_widget.spin_res_amount.setValue(250.0)
+
+        self.assertEqual(mission_widget.enemy_initial_resources.get("dark_matter"), 250.0)
+
+        # 切换回我方 (索引 0) 并修改合金
+        mission_widget.combo_res_camp.setCurrentIndex(0)
+        alloy_idx = mission_widget.combo_res_type.findData("alloy")
+        if alloy_idx != -1:
+            mission_widget.combo_res_type.setCurrentIndex(alloy_idx)
+        mission_widget.spin_res_amount.setValue(320.0)
+
+        self.assertEqual(mission_widget.player_initial_resources.get("alloy"), 320.0)
+
+        # 导出任务数据检验
+        m_data = mission_widget.get_mission_data()
+        self.assertEqual(m_data["player_initial_resources"]["alloy"], 320.0)
+        self.assertEqual(m_data["enemy_initial_resources"]["dark_matter"], 250.0)
 
 
 if __name__ == "__main__":

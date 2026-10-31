@@ -26,7 +26,8 @@ class MissionLoader:
             ammo=int(player_data.get("ammo", -1)),
             visibility=float(player_data.get("visibility", 1.0)),
             controllable=bool(player_data.get("controllable", True)),
-            ai_script=player_data.get("ai_script", None)
+            ai_script=player_data.get("ai_script", None),
+            converter_table=player_data.get("converter_table", None)
         )
 
         # 2. 我方多车编队列表 player_units
@@ -42,7 +43,8 @@ class MissionLoader:
                     ammo=int(p.get("ammo", -1)),
                     visibility=float(p.get("visibility", 1.0)),
                     controllable=bool(p.get("controllable", True)),
-                    ai_script=p.get("ai_script", None)
+                    ai_script=p.get("ai_script", None),
+                    converter_table=p.get("converter_table", None)
                 ))
         else:
             player_units = [single_player_info]
@@ -60,8 +62,12 @@ class MissionLoader:
                 ammo=int(e.get("ammo", -1)),
                 visibility=float(e.get("visibility", 1.0)),
                 controllable=bool(e.get("controllable", False)),
-                ai_script=e.get("ai_script", None)
+                ai_script=e.get("ai_script", None),
+                converter_table=e.get("converter_table", None)
             ))
+
+        p_init_res = data.get("player_initial_resources") or data.get("initial_resources", None)
+        e_init_res = data.get("enemy_initial_resources", None)
 
         return Mission(
             name=data.get("name", "Unnamed Mission"),
@@ -72,5 +78,8 @@ class MissionLoader:
             fog_of_war=fog_of_war,
             limited_ammo=limited_ammo,
             victory_conditions=data.get("victory_conditions", None),
-            defeat_conditions=data.get("defeat_conditions", None)
+            defeat_conditions=data.get("defeat_conditions", None),
+            initial_resources=p_init_res,
+            player_initial_resources=p_init_res,
+            enemy_initial_resources=e_init_res
         )

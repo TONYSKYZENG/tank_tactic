@@ -6,6 +6,8 @@ class TileType(IntEnum):
     EMPTY = 0
     BRICK = 1   # 可被摧毁的砖块
     STEEL = 2   # 不可摧毁的铁块
+    DARK_MATTER = 3  # 暗物质资源块
+    ALLOY = 4        # 合金资源块
     BASE = 9    # 基地
 
 @dataclass

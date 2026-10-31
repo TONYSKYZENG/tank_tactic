@@ -16,6 +16,7 @@ class PlayerMissionInfo:
     visibility: float = 1.0     # 辨识度：1.0 永远可见，0.0~1.0 每 tick/查询 发现概率
     controllable: bool = True   # 是否允许玩家手动框选或微操控制
     ai_script: Optional[str] = None  # 独立线程战术 Python 脚本路径
+    converter_table: Optional[List[str]] = None  # 转换配方列表
 
 @dataclass
 class EnemyMissionInfo:
@@ -28,6 +29,7 @@ class EnemyMissionInfo:
     visibility: float = 1.0     # 辨识度：1.0 永远可见，0.0~1.0 每 tick 侦测概率
     controllable: bool = False  # 敌军默认不可由玩家操控
     ai_script: Optional[str] = None  # 独立线程战术 Python 脚本路径
+    converter_table: Optional[List[str]] = None  # 转换配方列表
 
 @dataclass
 class Mission:
@@ -40,3 +42,6 @@ class Mission:
     limited_ammo: bool = True   # 是否启用有限弹药系统
     victory_conditions: Optional[Any] = None  # 获胜条件表达式（支持与或非及原语）
     defeat_conditions: Optional[Any] = None   # 失败条件表达式（支持与或非及原语）
+    initial_resources: Optional[Dict[str, float]] = None  # 初始资源储备
+    player_initial_resources: Optional[Dict[str, float]] = None  # 我方初始资源
+    enemy_initial_resources: Optional[Dict[str, float]] = None   # 敌方初始资源

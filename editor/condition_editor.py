@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any, List, Union, Tuple
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QGroupBox, QSpinBox, QDoubleSpinBox, QLineEdit, QTreeWidget, QTreeWidgetItem,
-    QSplitter, QPlainTextEdit, QMessageBox, QTabWidget, QHeaderView, QFrame
+    QSplitter, QPlainTextEdit, QMessageBox, QTabWidget, QHeaderView, QFrame, QMenu
 )
 from PyQt5.QtGui import QFont, QColor, QIcon
 from PyQt5.QtCore import Qt, pyqtSignal
@@ -22,6 +22,7 @@ class ConditionNodeType:
     UNIT_DESTROYED = "unit_destroyed"
     UNIT_SURVIVE_TIME = "unit_survive_time"
     AREA_VISIBLE = "area_visible"
+    RESOURCE_AMOUNT = "resource_amount"
     CONSTANT = "constant"
 
 
@@ -184,6 +185,31 @@ class ConditionEditorWidget(QWidget):
         a_layout.addLayout(grid_b)
 
         self.prop_box_layout.addWidget(self.area_field_widget)
+
+        # 4.5 资源储备达成 (Resource Amount)
+        self.resource_field_widget = QWidget()
+        r_layout = QVBoxLayout(self.resource_field_widget)
+        r_layout.setContentsMargins(0, 0, 0, 0)
+
+        r_sub1 = QHBoxLayout()
+        r_sub1.addWidget(QLabel("资源种类:"))
+        self.combo_res_type = QComboBox()
+        self.combo_res_type.addItem("🔮 暗物质 (dark_matter)", "dark_matter")
+        self.combo_res_type.addItem("⚙️ 合金 (alloy)", "alloy")
+        self.combo_res_type.currentIndexChanged.connect(self._on_prop_input_changed)
+        r_sub1.addWidget(self.combo_res_type)
+        r_layout.addLayout(r_sub1)
+
+        r_sub2 = QHBoxLayout()
+        r_sub2.addWidget(QLabel("目标储备数量:"))
+        self.spin_res_amount = QDoubleSpinBox()
+        self.spin_res_amount.setRange(1.0, 999999.0)
+        self.spin_res_amount.setValue(100.0)
+        self.spin_res_amount.valueChanged.connect(self._on_prop_input_changed)
+        r_sub2.addWidget(self.spin_res_amount)
+        r_layout.addLayout(r_sub2)
+
+        self.prop_box_layout.addWidget(self.resource_field_widget)
 
         # 5. 常量说明
         self.desc_field_widget = QWidget()
@@ -417,6 +443,13 @@ class ConditionEditorWidget(QWidget):
             item.setText(0, "🔭 探索指定区域 [area_visible]")
             item.setText(1, f"侦察瓦片矩形区域 ({tx}, {ty}) 尺寸 {tw}x{th}")
             item.setForeground(0, QColor("#1ABC9C"))
+        elif ntype == ConditionNodeType.RESOURCE_AMOUNT:
+            res = data.get("resource_type", "dark_matter")
+            amt = data.get("amount", 100.0)
+            res_display = "暗物质" if res == "dark_matter" else ("合金" if res == "alloy" else res)
+            item.setText(0, "💎 资源储备达成 [resource_amount]")
+            item.setText(1, f"拥有 [{res_display}] 达到 {amt:g}")
+            item.setForeground(0, QColor("#00E5FF"))
         elif ntype == ConditionNodeType.CONSTANT:
             desc = data.get("description", "常量")
             val = data.get("value", True)
@@ -473,17 +506,48 @@ class ConditionEditorWidget(QWidget):
         tree = self._get_active_tree()
         curr_item = tree.currentItem()
 
+        menu = QMenu(self)
+        menu.setStyleSheet("background-color: #24201A; color: #E8D8A0; border: 1px solid #6D532C;")
+
+        act_destroy = menu.addAction("🎯 摧毁指定单位 (unit_destroyed)")
+        act_survive = menu.addAction("⏳ 单位存活计时 (unit_survive_time)")
+        act_area = menu.addAction("🔭 探索指定区域 (area_visible)")
+        act_resource = menu.addAction("💎 资源储备达成 (resource_amount)")
+        act_all_enemies = menu.addAction("⚔ 全歼敌军 (all_enemies_destroyed)")
+        act_all_players = menu.addAction("☠ 我方全灭 (all_players_destroyed)")
+
+        action = menu.exec_(self.cursor().pos())
+        if not action:
+            return
+
         default_target = self.available_unit_ids[0] if self.available_unit_ids else "player_alpha"
-        data = {
-            "type": ConditionNodeType.UNIT_DESTROYED,
-            "unit_id": default_target
-        }
+
+        if action == act_destroy:
+            ntype = ConditionNodeType.UNIT_DESTROYED
+            data = {"type": ntype, "unit_id": default_target}
+        elif action == act_survive:
+            ntype = ConditionNodeType.UNIT_SURVIVE_TIME
+            data = {"type": ntype, "unit_id": default_target, "seconds": 30.0}
+        elif action == act_area:
+            ntype = ConditionNodeType.AREA_VISIBLE
+            data = {"type": ntype, "tile_x": 0, "tile_y": 0, "tile_w": 4, "tile_h": 4}
+        elif action == act_resource:
+            ntype = ConditionNodeType.RESOURCE_AMOUNT
+            data = {"type": ntype, "resource_type": "dark_matter", "amount": 100.0}
+        elif action == act_all_enemies:
+            ntype = ConditionNodeType.ALL_ENEMIES_DESTROYED
+            data = {"type": ntype}
+        elif action == act_all_players:
+            ntype = ConditionNodeType.ALL_PLAYERS_DESTROYED
+            data = {"type": ntype}
+        else:
+            return
 
         target_parent = tree
         if curr_item and curr_item.data(0, Qt.UserRole).get("type") in (ConditionNodeType.AND, ConditionNodeType.OR, ConditionNodeType.NOT):
             target_parent = curr_item
 
-        item = self._create_tree_item(ConditionNodeType.UNIT_DESTROYED, target_parent, data)
+        item = self._create_tree_item(ntype, target_parent, data)
         tree.setCurrentItem(item)
         self._update_json_preview()
         self.condition_modified.emit()
@@ -534,6 +598,12 @@ class ConditionEditorWidget(QWidget):
             self.spin_area_w.setValue(int(data.get("tile_w", 4)))
             self.spin_area_h.setValue(int(data.get("tile_h", 4)))
 
+        if ntype == ConditionNodeType.RESOURCE_AMOUNT:
+            res = data.get("resource_type", "dark_matter")
+            idx = 0 if res == "dark_matter" else 1
+            self.combo_res_type.setCurrentIndex(idx)
+            self.spin_res_amount.setValue(float(data.get("amount", 100.0)))
+
         if ntype == ConditionNodeType.CONSTANT:
             self.edit_description.setText(data.get("description", ""))
 
@@ -544,12 +614,14 @@ class ConditionEditorWidget(QWidget):
             self.unit_field_widget.setVisible(False)
             self.time_field_widget.setVisible(False)
             self.area_field_widget.setVisible(False)
+            self.resource_field_widget.setVisible(False)
             self.desc_field_widget.setVisible(False)
             return
 
         self.unit_field_widget.setVisible(ntype in (ConditionNodeType.UNIT_DESTROYED, ConditionNodeType.UNIT_SURVIVE_TIME))
         self.time_field_widget.setVisible(ntype == ConditionNodeType.UNIT_SURVIVE_TIME)
         self.area_field_widget.setVisible(ntype == ConditionNodeType.AREA_VISIBLE)
+        self.resource_field_widget.setVisible(ntype == ConditionNodeType.RESOURCE_AMOUNT)
         self.desc_field_widget.setVisible(ntype == ConditionNodeType.CONSTANT)
 
     def block_prop_signals(self, block: bool):
@@ -559,6 +631,8 @@ class ConditionEditorWidget(QWidget):
         self.spin_area_y.blockSignals(block)
         self.spin_area_w.blockSignals(block)
         self.spin_area_h.blockSignals(block)
+        self.combo_res_type.blockSignals(block)
+        self.spin_res_amount.blockSignals(block)
         self.edit_description.blockSignals(block)
 
     def _on_prop_input_changed(self):
@@ -581,6 +655,10 @@ class ConditionEditorWidget(QWidget):
             data["tile_y"] = self.spin_area_y.value()
             data["tile_w"] = self.spin_area_w.value()
             data["tile_h"] = self.spin_area_h.value()
+
+        if ntype == ConditionNodeType.RESOURCE_AMOUNT:
+            data["resource_type"] = self.combo_res_type.currentData() or "dark_matter"
+            data["amount"] = self.spin_res_amount.value()
 
         if ntype == ConditionNodeType.CONSTANT:
             data["description"] = self.edit_description.text().strip()

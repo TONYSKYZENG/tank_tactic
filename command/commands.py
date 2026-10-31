@@ -1,7 +1,7 @@
 import math
 import random
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Any
 from physics.entities import Tank, Direction, Camp
 from map_loader.models import GameMap, TileType
 from .pathfinder import GridPathfinder
@@ -25,14 +25,14 @@ class BaseCommand(ABC):
             step = 1 if row2 > row1 else -1
             for r in range(row1 + step, row2, step):
                 if 0 <= col1 < game_map.cols and 0 <= r < game_map.rows:
-                    if game_map.get_tile(col1, r) in (TileType.BRICK, TileType.STEEL, TileType.BASE):
+                    if game_map.get_tile(col1, r) in (TileType.BRICK, TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY):
                         return False
             return True
         elif row1 == row2:
             step = 1 if col2 > col1 else -1
             for c in range(col1 + step, col2, step):
                 if 0 <= c < game_map.cols and 0 <= row1 < game_map.rows:
-                    if game_map.get_tile(c, row1) in (TileType.BRICK, TileType.STEEL, TileType.BASE):
+                    if game_map.get_tile(c, row1) in (TileType.BRICK, TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY):
                         return False
             return True
 
@@ -51,7 +51,7 @@ class BaseCommand(ABC):
             c = int(px // tile_size)
             r = int(py // tile_size)
             if 0 <= c < game_map.cols and 0 <= r < game_map.rows:
-                if game_map.get_tile(c, r) in (TileType.BRICK, TileType.STEEL, TileType.BASE):
+                if game_map.get_tile(c, r) in (TileType.BRICK, TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY):
                     return False
         return True
 
@@ -105,6 +105,8 @@ class MoveCommand(BaseCommand):
     def execute(self, tank: Tank, physics_engine, game_map: GameMap) -> bool:
         if not tank.alive or tank.is_tower:
             return True
+        if getattr(tank, "is_converting", False):
+            return False
 
         dist_to_final = math.hypot(self.dest_x - tank.x, self.dest_y - tank.y)
         if dist_to_final <= self.tolerance:
@@ -272,6 +274,8 @@ class AttackTargetCommand(BaseCommand):
     def execute(self, tank: Tank, physics_engine, game_map: GameMap) -> bool:
         if not tank.alive or not self.target_tank.alive:
             return True
+        if getattr(tank, "is_converting", False):
+            return False
 
         tile_size = game_map.tile_size
         center_x = tank.x + tank.size / 2.0
@@ -487,4 +491,86 @@ class GuardUnitCommand(BaseCommand):
 class HoldCommand(BaseCommand):
     """原地驻守命令"""
     def execute(self, tank: Tank, physics_engine, game_map: GameMap) -> bool:
+        return False
+
+
+class HarvestCommand(BaseCommand):
+    """
+    智能资源开采命令：
+    - 目标为地图上的资源块 (target_col, target_row)
+    - 若不在可采集半径 (harvest_radius) 内，自动寻路移动到资源块周围最近的合法可通行地块
+    - 到达开采半径内后停止位移，开启 tank.start_harvest(target_col, target_row)
+    - 在开采过程中维持驻守开采，实时结算开采与排他检测
+    - 当资源块耗尽或目标不存在时，任务结束
+    """
+    def __init__(self, target_col: int, target_row: int, resource_manager: Any, auto_clear_path: bool = True):
+        self.target_col = int(target_col)
+        self.target_row = int(target_row)
+        self.resource_manager = resource_manager
+        self.auto_clear_path = auto_clear_path
+        self.move_subcmd: Optional[MoveCommand] = None
+
+    def _find_standable_harvest_pos(self, tank: Tank, physics_engine, game_map: GameMap, block: Any) -> Optional[Tuple[float, float]]:
+        ts = game_map.tile_size
+        cx, cy = block.center(ts)
+        r = int(math.ceil(block.harvest_radius / ts))
+
+        candidates = []
+        for dr in range(-r, r + 1):
+            for dc in range(-r, r + 1):
+                col = self.target_col + dc
+                row = self.target_row + dr
+                if 0 <= col < game_map.cols and 0 <= row < game_map.rows:
+                    test_x = col * ts + (ts - tank.size) / 2.0
+                    test_y = row * ts + (ts - tank.size) / 2.0
+                    if physics_engine.can_move_to(tank, test_x, test_y):
+                        tank_cx = test_x + tank.size / 2.0
+                        tank_cy = test_y + tank.size / 2.0
+                        dist = math.hypot(tank_cx - cx, tank_cy - cy)
+                        if dist <= block.harvest_radius:
+                            dist_to_tank = math.hypot(test_x - tank.x, test_y - tank.y)
+                            candidates.append((dist_to_tank, test_x, test_y))
+
+        if candidates:
+            candidates.sort(key=lambda item: item[0])
+            return candidates[0][1], candidates[0][2]
+        return None
+
+    def execute(self, tank: Tank, physics_engine, game_map: GameMap) -> bool:
+        if not tank.alive or tank.is_tower:
+            tank.stop_harvest()
+            return True
+
+        if getattr(tank, "is_converting", False):
+            tank.stop_harvest()
+            return False
+
+        block = self.resource_manager.get_block_at(self.target_col, self.target_row) if self.resource_manager else None
+        if not block or block.current_amount <= 0:
+            tank.stop_harvest()
+            return True
+
+        ts = game_map.tile_size
+        # 1. 检查是否已经在开采范围内
+        if block.is_in_harvest_range(tank, ts):
+            self.move_subcmd = None
+            if not tank.is_harvesting or tank.harvest_target != (self.target_col, self.target_row):
+                tank.start_harvest(self.target_col, self.target_row)
+            return False
+
+        # 2. 不在开采范围内：寻路靠近
+        if self.move_subcmd is None:
+            dest = self._find_standable_harvest_pos(tank, physics_engine, game_map, block)
+            if dest:
+                self.move_subcmd = MoveCommand(dest[0], dest[1], tolerance=10.0, auto_clear_path=self.auto_clear_path)
+            else:
+                tank.stop_harvest()
+                return True
+
+        if self.move_subcmd:
+            self.move_subcmd.execute(tank, physics_engine, game_map)
+            if block.is_in_harvest_range(tank, ts):
+                self.move_subcmd = None
+                tank.start_harvest(self.target_col, self.target_row)
+
         return False

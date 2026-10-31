@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable, Optional, Dict, Any
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-def extract_game_state_snapshot(physics_engine, game_map, command_dispatcher) -> Dict[str, Any]:
+def extract_game_state_snapshot(physics_engine, game_map, command_dispatcher, resource_manager=None) -> Dict[str, Any]:
     """
     从物理引擎、地图与调度器中抓取【全知上帝视角】的完整遥测快照
     包含处于迷雾内部不可见的敌军坐标与全部属性
@@ -48,6 +48,10 @@ def extract_game_state_snapshot(physics_engine, game_map, command_dispatcher) ->
                 "tactic": tactic.value if tactic else "manual",
                 "command": cmd.__class__.__name__ if cmd else "None",
                 "auto_clear": auto_clr,
+                "is_harvesting": getattr(t, "is_harvesting", False),
+                "harvest_state": getattr(t, "harvest_state", "idle"),
+                "harvest_target": getattr(t, "harvest_target", None),
+                "is_converting": getattr(t, "is_converting", False),
                 "color": t.color
             })
 
@@ -73,6 +77,10 @@ def extract_game_state_snapshot(physics_engine, game_map, command_dispatcher) ->
                 "visibility": round(e.visibility, 2),
                 "is_spotted": bool(e.is_spotted),
                 "tactic": getattr(e, "tactic_name", "ai"),
+                "is_harvesting": getattr(e, "is_harvesting", False),
+                "harvest_state": getattr(e, "harvest_state", "idle"),
+                "harvest_target": getattr(e, "harvest_target", None),
+                "is_converting": getattr(e, "is_converting", False),
                 "color": e.color
             })
 
@@ -105,7 +113,19 @@ def extract_game_state_snapshot(physics_engine, game_map, command_dispatcher) ->
         },
         "player_units": player_units,
         "enemy_units": enemy_units,
-        "bullets": bullets
+        "bullets": bullets,
+        "resources": resource_manager.get_both_stockpiles() if resource_manager else {},
+        "resource_blocks": [
+            {
+                "col": b.col,
+                "row": b.row,
+                "type": b.resource_type,
+                "amount": round(b.current_amount, 1),
+                "max": b.max_amount,
+                "harvest_radius": b.harvest_radius,
+                "exclusive_radius": b.exclusive_radius
+            } for b in resource_manager.blocks
+        ] if resource_manager else []
     }
 
 

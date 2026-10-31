@@ -53,14 +53,14 @@ class GridPathfinder:
                 is_infinite_ammo = False
                 current_ammo = tank.ammo
 
-        # 若目标点本身是铁块 (STEEL)，在目标周围寻找最近的可达空地
-        if self.game_map.get_tile(goal_c, goal_r) == TileType.STEEL:
+        # 若目标点本身是不可穿越实体，在目标周围寻找最近的可达空地
+        if self.game_map.get_tile(goal_c, goal_r) in (TileType.STEEL, TileType.DARK_MATTER, TileType.ALLOY):
             best_sub = None
             best_sub_d = 999999.0
             for dc, dr in [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (-1, -1), (1, -1), (-1, 1)]:
                 tc, tr = goal_c + dc, goal_r + dr
                 if 0 <= tc < cols and 0 <= tr < rows:
-                    if self.game_map.get_tile(tc, tr) != TileType.STEEL:
+                    if self.game_map.get_tile(tc, tr) not in (TileType.STEEL, TileType.DARK_MATTER, TileType.ALLOY):
                         d = abs(tc - start_c) + abs(tr - start_r)
                         if d < best_sub_d:
                             best_sub_d = d
@@ -99,8 +99,8 @@ class GridPathfinder:
 
                 tile = self.game_map.get_tile(nc, nr)
 
-                # 铁墙不可穿透
-                if tile == TileType.STEEL:
+                # 铁墙或资源矿体不可穿透
+                if tile in (TileType.STEEL, TileType.DARK_MATTER, TileType.ALLOY):
                     continue
 
                 # 基地核心仅允许作为终点

@@ -24,6 +24,8 @@ from conditions import (
 )
 from ai_python.manager import AIScriptManager
 from api.controller import GameAPIController
+from resource import ResourceManager, ResourceLoader
+from converter import RecipeRegistry
 
 class HeadlessGameRunner(QObject):
     """
@@ -66,6 +68,17 @@ class HeadlessGameRunner(QObject):
         self.game_victory = False
         self.is_paused = True
 
+        # 经济系统
+        self.resource_loader = ResourceLoader()
+        self.resource_configs = self.resource_loader.load_configs(self.base_dir / "resource")
+        self.resource_manager = ResourceManager(
+            initial_resources=getattr(self.mission, "initial_resources", None),
+            player_initial_resources=getattr(self.mission, "player_initial_resources", None),
+            enemy_initial_resources=getattr(self.mission, "enemy_initial_resources", None)
+        )
+        self.resource_manager.init_from_map(self.game_map, self.resource_configs)
+        RecipeRegistry.load_recipes(self.base_dir / "converter")
+
         self._setup_mission_entities()
 
         # 启动战术脚本线程
@@ -94,7 +107,7 @@ class HeadlessGameRunner(QObject):
             self.api_controller.flush_pending_actions()
 
     def _setup_conditions(self):
-        self.condition_ctx = ConditionContext(self.physics_engine, self.game_map)
+        self.condition_ctx = ConditionContext(self.physics_engine, self.game_map, self.resource_manager)
 
         if self.mission.victory_conditions:
             self.victory_condition = ConditionBuilder.build(self.mission.victory_conditions)
@@ -151,7 +164,9 @@ class HeadlessGameRunner(QObject):
                 controllable=getattr(p_info, "controllable", True),
                 ai_script=getattr(p_info, "ai_script", None),
                 can_crush_bricks=getattr(cfg, "can_crush_bricks", False),
-                crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5)
+                crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5),
+                converter_table=p_info.converter_table if getattr(p_info, "converter_table", None) is not None else getattr(cfg, "converter_table", []),
+                harvest_speed=getattr(cfg, "harvest_speed", None)
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -187,7 +202,9 @@ class HeadlessGameRunner(QObject):
                 controllable=getattr(enemy_info, "controllable", False),
                 ai_script=getattr(enemy_info, "ai_script", None),
                 can_crush_bricks=getattr(cfg, "can_crush_bricks", False),
-                crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5)
+                crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5),
+                converter_table=enemy_info.converter_table if getattr(enemy_info, "converter_table", None) is not None else getattr(cfg, "converter_table", []),
+                harvest_speed=getattr(cfg, "harvest_speed", None)
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -255,9 +272,17 @@ class HeadlessGameRunner(QObject):
                         self.command_marker = (target_enemy.x + target_enemy.size / 2.0,
                                                target_enemy.y + target_enemy.size / 2.0, True, 20)
                     else:
-                        # 3. 移动
-                        self.command_dispatcher.issue_move(selected, x, y)
-                        self.command_marker = (x, y, False, 20)
+                        ts = self.game_map.tile_size
+                        click_col = int(x // ts)
+                        click_row = int(y // ts)
+                        target_res_block = self.resource_manager.get_block_at(click_col, click_row)
+                        if target_res_block:
+                            self.command_dispatcher.issue_harvest(selected, click_col, click_row, self.resource_manager)
+                            self.command_marker = ((click_col + 0.5) * ts, (click_row + 0.5) * ts, False, 20)
+                        else:
+                            # 3. 移动
+                            self.command_dispatcher.issue_move(selected, x, y)
+                            self.command_marker = (x, y, False, 20)
 
     def handle_key_event(self, key_name: str, is_down: bool):
         norm_key = key_name.lower()
@@ -406,6 +431,8 @@ class HeadlessGameRunner(QObject):
             "micro_auto_clear": micro_auto_clear,
             "fog_enabled": self.physics_engine.fog_of_war_enabled,
             "limited_ammo_enabled": self.physics_engine.limited_ammo_enabled,
+            "resources": self.resource_manager.get_all_resources(camp="player"),
+            "resource_rates": self.resource_manager.get_harvest_rates(camp="player"),
             "game_over": self.game_over,
             "game_victory": self.game_victory,
             "victory_desc": self.victory_condition.get_description(),
@@ -490,6 +517,15 @@ class HeadlessGameRunner(QObject):
     def _step(self):
         if not self.game_over and not self.game_victory and not self.is_paused:
             self.condition_ctx.update(0.016)
+
+            # 推进经济系统与转换机
+            self.resource_manager.update(0.016)
+            all_tanks = self.physics_engine.player_tanks + self.physics_engine.enemy_tanks
+            self.resource_manager.update_harvest(all_tanks, 0.016, self.game_map.tile_size)
+            for t in all_tanks:
+                if t.alive and t.converter:
+                    camp_str = t.camp.value if hasattr(t.camp, "value") else str(t.camp)
+                    t.converter.update(0.016, self.resource_manager, camp=camp_str)
 
             has_manual_input = self._process_micro_tank_input()
             self.command_dispatcher.update(

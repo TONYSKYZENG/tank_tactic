@@ -162,3 +162,79 @@ class TankScriptAPI:
     def set_guard(self, target_id: str) -> Dict[str, Any]:
         """贴身保卫并护航目标单位"""
         return self._call("command_set_guard", unit_ids=[self.tank_id], target_id=target_id)
+
+    # ================= 资源经济与配方转换 =================
+
+    def convert(self, recipe_id: str, count: int = 1, unit_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        开始或向队列追加配方转换任务
+        :param recipe_id: 配方 ID (如 'recipe_dm_to_alloy')
+        :param count: 转换批次数 (默认 1)
+        :param unit_id: 执行转换的目标单位 ID (缺省默认为本车 self.tank_id)
+        """
+        target = unit_id or self.tank_id
+        return self._call("convert", unit_id=target, recipe_id=recipe_id, count=count)
+
+    def terminate_convert(self, unit_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        终止并清空转换队列
+        :param unit_id: 指定单位 ID 则终止该车；缺省则清空全员转换队列
+        """
+        params = {}
+        if unit_id is not None:
+            params["unit_id"] = unit_id
+        return self._call("terminate_convert", **params)
+
+    def get_resources(self) -> Dict[str, Any]:
+        """查询当前拥有的所有各类资源储备及每秒产出速率"""
+        return self._call("get_resources")
+
+    def harvest(self, col: int, row: int, unit_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        命令指定单位（缺省默认为本车）采集地图目标瓦片 (col, row) 的资源块
+        若距离超出 harvest_radius 或有敌军在 exclusive_radius 内，引擎将标记对应争夺/超距状态
+        """
+        target = unit_id or self.tank_id
+        return self._call("harvest", unit_id=target, col=col, row=row)
+
+    def stop_harvest(self, unit_id: Optional[str] = None) -> Dict[str, Any]:
+        """停止当前资源采集动作"""
+        target = unit_id or self.tank_id
+        return self._call("stop_harvest", unit_id=target)
+
+    def get_resource_blocks(self) -> List[Dict[str, Any]]:
+        """全知全能查询地图上所有活跃资源块信息、当前存量、排他判定与可采集范围"""
+        resp = self._call("list_resource_blocks", unit_id=self.tank_id)
+        return resp.get("blocks", [])
+
+    def harvest_nearest(self, resource_type: Optional[str] = None, unit_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        便捷战术动作：自动定位全图距离最近、具备存量且无敌方争夺的资源块并展开开采
+        若未到达可采集半径，自动下达移动并锁定目标开采
+        """
+        target_uid = unit_id or self.tank_id
+        my_status = self.report(target_uid)
+        my_x, my_y = my_status.get("x", 0.0), my_status.get("y", 0.0)
+
+        blocks = self.get_resource_blocks()
+        if resource_type:
+            blocks = [b for b in blocks if b.get("resource_type") == resource_type]
+
+        # 筛选尚有存量的资源块
+        valid_blocks = [b for b in blocks if b.get("current_amount", 0.0) > 0]
+        if not valid_blocks:
+            valid_blocks = blocks
+
+        if not valid_blocks:
+            return {"status": "error", "error": "No available resource blocks found"}
+
+        # 按像素欧氏距离排序
+        import math
+        valid_blocks.sort(key=lambda b: math.hypot(b["x"] - my_x, b["y"] - my_y))
+        best_block = valid_blocks[0]
+
+        # 若不在采集范围内，先下达移动
+        if not best_block.get("in_range", False):
+            self.move(best_block["x"], best_block["y"])
+
+        return self.harvest(best_block["col"], best_block["row"], unit_id=target_uid)

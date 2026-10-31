@@ -9,6 +9,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 
 from map_loader.models import GameMap, TileType
 from map_loader.loader import MapLoader
+from resource.loader import ResourceLoader
 from translations import i18n, t
 from .canvas import EditorCanvas, EditorMode, TerrainTool
 
@@ -82,15 +83,23 @@ class MapEditorWidget(QWidget):
         tile_layout = QVBoxLayout(self.tile_group)
 
         self.tile_btn_group = QButtonGroup(self)
+        res_configs = ResourceLoader.load_configs()
         self.tiles_info = [
-            (TileType.BRICK, "#9E3B1B"),
-            (TileType.STEEL, "#B5B9C2"),
-            (TileType.EMPTY, "#11100D"),
-            (TileType.BASE, "#D35400")
+            (TileType.BRICK, "#9E3B1B", "brick", "砖块 (Brick)"),
+            (TileType.STEEL, "#B5B9C2", "steel", "钢墙 (Steel)")
         ]
+        # 动态从 resource/*.json 读取全部资源块信息，不再硬编码
+        for cfg in res_configs.values():
+            self.tiles_info.append((cfg.tile_id, cfg.color, cfg.resource_type, f"{cfg.name} (ID:{cfg.tile_id})"))
+
+        self.tiles_info.extend([
+            (TileType.EMPTY, "#11100D", "empty", "空地 (Empty)"),
+            (TileType.BASE, "#D35400", "base", "基地 (Base)")
+        ])
 
         self.tile_buttons = []
-        for i, (ttype, color_code) in enumerate(self.tiles_info):
+        for i, info in enumerate(self.tiles_info):
+            ttype, color_code = info[0], info[1]
             btn = QPushButton()
             btn.setCheckable(True)
             if ttype == TileType.BRICK:
@@ -216,14 +225,14 @@ class MapEditorWidget(QWidget):
         self.btn_eraser.setText(t("editor.map.eraser"))
 
         self.tile_group.setTitle(t("editor.map.tile_palette"))
-        tile_texts = [
-            t("editor.map.tiles.brick"),
-            t("editor.map.tiles.steel"),
-            t("editor.map.tiles.empty"),
-            t("editor.map.tiles.base")
-        ]
-        for btn, label_text in zip(self.tile_buttons, tile_texts):
-            btn.setText(f"  {label_text}")
+        for btn, info in zip(self.tile_buttons, self.tiles_info):
+            key_name = info[2]
+            default_label = info[3]
+            trans_key = f"editor.map.tiles.{key_name}"
+            translated = t(trans_key)
+            if translated == trans_key:
+                translated = default_label
+            btn.setText(f"  {translated}")
 
         self.batch_group.setTitle(t("editor.map.batch_ops"))
         self.btn_fill_all.setText(t("editor.map.fill_all"))
@@ -265,6 +274,8 @@ class MapEditorWidget(QWidget):
             TileType.EMPTY: t("editor.map.tiles.empty"),
             TileType.BRICK: t("editor.map.tiles.brick"),
             TileType.STEEL: t("editor.map.tiles.steel"),
+            TileType.DARK_MATTER: t("editor.map.tiles.dark_matter"),
+            TileType.ALLOY: t("editor.map.tiles.alloy"),
             TileType.BASE: t("editor.map.tiles.base")
         }
         tname = tile_names.get(tile, f"未知({tile})")

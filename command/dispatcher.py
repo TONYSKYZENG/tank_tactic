@@ -1,10 +1,10 @@
 import math
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from physics.entities import Tank, Direction, Camp
 from map_loader.models import GameMap, TileType
 from grouping.formation import calculate_formation_slots
 from .tactics_mode import TacticMode
-from .commands import BaseCommand, MoveCommand, AttackTargetCommand, HoldCommand, GuardUnitCommand
+from .commands import BaseCommand, MoveCommand, AttackTargetCommand, HoldCommand, GuardUnitCommand, HarvestCommand
 
 class CommandDispatcher:
     """
@@ -54,10 +54,23 @@ class CommandDispatcher:
         if not valid_tanks:
             return
 
+        for tank in valid_tanks:
+            if getattr(tank, "is_harvesting", False):
+                tank.stop_harvest()
+
         slots = calculate_formation_slots(target_x, target_y, len(valid_tanks), spacing=42.0)
         for tank, (sx, sy) in zip(valid_tanks, slots):
             clear_path = self.is_auto_clear_path(tank)
             self.tank_commands[tank.id] = MoveCommand(dest_x=sx, dest_y=sy, auto_clear_path=clear_path)
+
+    def issue_harvest(self, tanks: List[Tank], target_col: int, target_row: int, resource_manager: Any):
+        """下达前往并开采资源块指令"""
+        valid_tanks = [t for t in tanks if t.alive and not t.is_tower]
+        if not valid_tanks:
+            return
+        for tank in valid_tanks:
+            clear_path = self.is_auto_clear_path(tank)
+            self.tank_commands[tank.id] = HarvestCommand(target_col, target_row, resource_manager, auto_clear_path=clear_path)
 
     def issue_attack_target(self, tanks: List[Tank], target_tank: Tank, physics_engine=None, ignore_vision: bool = False):
         if not target_tank.alive:
@@ -69,6 +82,8 @@ class CommandDispatcher:
 
         for tank in tanks:
             if tank.alive:
+                if getattr(tank, "is_harvesting", False):
+                    tank.stop_harvest()
                 clear_path = self.is_auto_clear_path(tank)
                 curr_cmd = self.tank_commands.get(tank.id)
                 # 若已在追击该相同存活目标，保持现有寻路与行军子命令，避免高频打断抽搐
@@ -115,6 +130,8 @@ class CommandDispatcher:
             return
         for tank in tanks:
             if tank.alive and tank != target_to_guard:
+                if getattr(tank, "is_harvesting", False):
+                    tank.stop_harvest()
                 self.tank_tactics[tank.id] = TacticMode.GUARD_UNIT
                 self.guard_targets[tank.id] = target_to_guard.id
                 self.tank_commands[tank.id] = GuardUnitCommand(target_to_guard)

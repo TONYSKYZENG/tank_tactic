@@ -1,7 +1,7 @@
 import math
 from enum import Enum
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Any
+from typing import Tuple, List, Optional, Any, Dict
 
 class Direction(Enum):
     UP = (0, -1)
@@ -162,7 +162,9 @@ class Tank:
                  ai_script: Optional[str] = None,
                  angle: Optional[float] = None,
                  can_crush_bricks: bool = False,
-                 crush_speed_factor: float = 0.5):
+                 crush_speed_factor: float = 0.5,
+                 converter_table: Optional[List[str]] = None,
+                 harvest_speed: Optional[Dict[str, float]] = None):
         self.id = tank_id
         self.unit_type = unit_type
         self.x = x
@@ -205,6 +207,36 @@ class Tank:
         self.resupply_interval = resupply_interval
         self.resupply_timer = 0
         self.just_resupplied_timer = 0  # 获得补给视觉闪烁标记
+
+        # ===== 资源转换机系统 (Converter) =====
+        self.converter_table = list(converter_table or [])
+        if self.converter_table:
+            from converter.models import UnitConverter
+            self.converter = UnitConverter(self.converter_table)
+        else:
+            self.converter = None
+
+        # ===== 资源采集动作与速度 =====
+        self.harvest_speed: Dict[str, float] = dict(harvest_speed) if harvest_speed is not None else {"dark_matter": 2.0, "alloy": 1.5}
+        self.is_harvesting: bool = False
+        self.harvest_target: Optional[Tuple[int, int]] = None
+        self.harvest_state: str = "idle"  # "idle", "harvesting", "contested", "out_of_range", "depleted"
+
+    def start_harvest(self, col: int, row: int) -> None:
+        """对指定地图瓦片坐标 (col, row) 的资源块展开开采"""
+        self.is_harvesting = True
+        self.harvest_target = (int(col), int(row))
+        self.harvest_state = "harvesting"
+
+    def stop_harvest(self) -> None:
+        """停止当前资源开采动作"""
+        self.is_harvesting = False
+        self.harvest_target = None
+        self.harvest_state = "idle"
+
+    @property
+    def is_converting(self) -> bool:
+        return bool(self.converter and self.converter.is_converting)
 
     @property
     def angle(self) -> float:
@@ -281,7 +313,7 @@ class Tank:
         return resupplied
 
     def can_fire(self, limited_ammo_enabled: bool = True) -> bool:
-        if not self.alive or not self.can_attack or self.fire_cooldown > 0:
+        if not self.alive or not self.can_attack or self.fire_cooldown > 0 or self.is_converting:
             return False
         if limited_ammo_enabled and self.ammo != -1:
             return self.ammo > 0
@@ -302,5 +334,6 @@ class Tank:
         self.health -= amount
         if self.health <= 0:
             self.alive = False
+            self.stop_harvest()
             return True
         return False

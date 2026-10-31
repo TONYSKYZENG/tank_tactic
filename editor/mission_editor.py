@@ -12,6 +12,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from map_loader.models import GameMap
 from mission_loader.models import Mission, PlayerMissionInfo, EnemyMissionInfo, SpawnPoint
 from tank_configs.config_loader import TankConfig
+from resource.loader import ResourceLoader
 from translations import i18n, t
 from .canvas import EditorCanvas, EditorMode
 
@@ -41,6 +42,9 @@ class MissionEditorWidget(QWidget):
 
         self._available_configs = self._scan_tank_configs()
         self._available_scripts = self._scan_ai_scripts()
+        self.res_configs = ResourceLoader.load_configs(self.base_dir / "resource")
+        self.player_initial_resources: Dict[str, float] = {"dark_matter": 100.0, "alloy": 50.0}
+        self.enemy_initial_resources: Dict[str, float] = {"dark_matter": 0.0, "alloy": 0.0}
         self._init_ui()
         self.retranslate_ui()
 
@@ -157,6 +161,47 @@ class MissionEditorWidget(QWidget):
         global_layout.addWidget(self.btn_new_mission)
 
         left_layout.addWidget(self.global_group)
+
+        # 5. 敌我双方初始战略资源下拉编辑器
+        self.res_group = QGroupBox("★ 初始战略资源")
+        res_layout = QVBoxLayout(self.res_group)
+
+        res_camp_row = QHBoxLayout()
+        self.lbl_res_camp_tag = QLabel("阵营:")
+        res_camp_row.addWidget(self.lbl_res_camp_tag)
+        self.combo_res_camp = QComboBox()
+        self.combo_res_camp.addItems(["我方 (Player)", "敌方 (Enemy)"])
+        self.combo_res_camp.currentIndexChanged.connect(self._on_res_selection_changed)
+        res_camp_row.addWidget(self.combo_res_camp)
+        res_layout.addLayout(res_camp_row)
+
+        res_type_row = QHBoxLayout()
+        self.lbl_res_type_tag = QLabel("资源:")
+        res_type_row.addWidget(self.lbl_res_type_tag)
+        self.combo_res_type = QComboBox()
+        for r_type, cfg in self.res_configs.items():
+            self.combo_res_type.addItem(f"{cfg.name} ({r_type})", r_type)
+        self.combo_res_type.currentIndexChanged.connect(self._on_res_selection_changed)
+        res_type_row.addWidget(self.combo_res_type)
+        res_layout.addLayout(res_type_row)
+
+        res_amt_row = QHBoxLayout()
+        self.lbl_res_amt_tag = QLabel("储量:")
+        res_amt_row.addWidget(self.lbl_res_amt_tag)
+        self.spin_res_amount = QDoubleSpinBox()
+        self.spin_res_amount.setRange(0.0, 999999.0)
+        self.spin_res_amount.setSingleStep(50.0)
+        self.spin_res_amount.setValue(100.0)
+        self.spin_res_amount.valueChanged.connect(self._on_res_amount_changed)
+        res_amt_row.addWidget(self.spin_res_amount)
+        res_layout.addLayout(res_amt_row)
+
+        self.lbl_res_summary = QLabel()
+        self.lbl_res_summary.setStyleSheet("color: #D4AF37; font-size: 11px;")
+        self.lbl_res_summary.setWordWrap(True)
+        res_layout.addWidget(self.lbl_res_summary)
+
+        left_layout.addWidget(self.res_group)
         main_layout.addWidget(left_panel)
 
         # ===== 中间地图画布视口 =====
@@ -351,6 +396,18 @@ class MissionEditorWidget(QWidget):
         self.chk_fog.setText(t("editor.mission.fog"))
         self.chk_ammo.setText(t("editor.mission.ammo"))
 
+        self.res_group.setTitle(t("editor.mission.initial_resources"))
+        self.lbl_res_camp_tag.setText(t("editor.mission.res_camp"))
+        self.lbl_res_type_tag.setText(t("editor.mission.res_type"))
+        self.lbl_res_amt_tag.setText(t("editor.mission.res_amount"))
+        cur_res_camp_idx = self.combo_res_camp.currentIndex()
+        self.combo_res_camp.blockSignals(True)
+        self.combo_res_camp.clear()
+        self.combo_res_camp.addItems([t("editor.mission.camps.player"), t("editor.mission.camps.enemy")])
+        self.combo_res_camp.setCurrentIndex(cur_res_camp_idx)
+        self.combo_res_camp.blockSignals(False)
+        self._update_res_summary_label()
+
         self.prop_header.setText(t("editor.mission.inspector_title"))
         self.basic_group.setTitle(t("editor.mission.identity"))
         self.lbl_id_tag.setText(t("editor.mission.unit_id"))
@@ -379,6 +436,31 @@ class MissionEditorWidget(QWidget):
         self.lbl_tactic_tag.setText(t("editor.mission.enemy_tactic"))
 
         self._refresh_unit_list()
+
+    def _on_res_selection_changed(self):
+        camp_idx = self.combo_res_camp.currentIndex()
+        r_type = self.combo_res_type.currentData() or "dark_matter"
+        target_dict = self.player_initial_resources if camp_idx == 0 else self.enemy_initial_resources
+        current_val = float(target_dict.get(r_type, 0.0))
+        self.spin_res_amount.blockSignals(True)
+        self.spin_res_amount.setValue(current_val)
+        self.spin_res_amount.blockSignals(False)
+        self._update_res_summary_label()
+
+    def _on_res_amount_changed(self, val: float):
+        camp_idx = self.combo_res_camp.currentIndex()
+        r_type = self.combo_res_type.currentData() or "dark_matter"
+        if camp_idx == 0:
+            self.player_initial_resources[r_type] = float(val)
+        else:
+            self.enemy_initial_resources[r_type] = float(val)
+        self._update_res_summary_label()
+        self.mission_modified.emit()
+
+    def _update_res_summary_label(self):
+        p_str = ", ".join(f"{k}:{v:.0f}" for k, v in self.player_initial_resources.items())
+        e_str = ", ".join(f"{k}:{v:.0f}" for k, v in self.enemy_initial_resources.items())
+        self.lbl_res_summary.setText(f"🔵我方: {p_str or '无'}\n🔴敌方: {e_str or '无'}")
 
     def _on_coord_changed(self, col: int, row: int, px: int, py: int, tile: int):
         unit_at = self.canvas._find_unit_at(col, row)
@@ -419,7 +501,10 @@ class MissionEditorWidget(QWidget):
             fog_of_war=True,
             limited_ammo=True,
             victory_conditions={"type": "all_enemies_destroyed"},
-            defeat_conditions={"type": "all_players_destroyed"}
+            defeat_conditions={"type": "all_players_destroyed"},
+            initial_resources={"dark_matter": 100.0, "alloy": 50.0},
+            player_initial_resources={"dark_matter": 100.0, "alloy": 50.0},
+            enemy_initial_resources={"dark_matter": 0.0, "alloy": 0.0}
         )
         self.set_mission(new_mission)
         self.mission_modified.emit()
@@ -434,6 +519,18 @@ class MissionEditorWidget(QWidget):
         self.edit_map_file.setText(mission.map_file)
         self.chk_fog.setChecked(mission.fog_of_war)
         self.chk_ammo.setChecked(mission.limited_ammo)
+
+        # 同步敌我双方初始战略资源
+        p_init = getattr(mission, "player_initial_resources", None) or getattr(mission, "initial_resources", None) or {}
+        e_init = getattr(mission, "enemy_initial_resources", None) or {}
+        self.player_initial_resources = {k: float(v) for k, v in p_init.items()}
+        self.enemy_initial_resources = {k: float(v) for k, v in e_init.items()}
+        for r_type in self.res_configs:
+            if r_type not in self.player_initial_resources:
+                self.player_initial_resources[r_type] = 100.0 if r_type == "dark_matter" else 50.0
+            if r_type not in self.enemy_initial_resources:
+                self.enemy_initial_resources[r_type] = 0.0
+        self._on_res_selection_changed()
 
         self.player_units = list(mission.player_units) if mission.player_units else [mission.player]
         self.enemies = list(mission.enemies)
@@ -490,7 +587,10 @@ class MissionEditorWidget(QWidget):
             "limited_ammo": self.chk_ammo.isChecked(),
             "player": primary_player,
             "player_units": player_units_data,
-            "enemies": enemies_data
+            "enemies": enemies_data,
+            "player_initial_resources": dict(self.player_initial_resources),
+            "enemy_initial_resources": dict(self.enemy_initial_resources),
+            "initial_resources": dict(self.player_initial_resources)
         }
         if self.current_mission and self.current_mission.victory_conditions:
             m_dict["victory_conditions"] = self.current_mission.victory_conditions

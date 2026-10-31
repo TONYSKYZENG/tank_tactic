@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class TankConfig:
@@ -23,11 +23,18 @@ class TankConfig:
     # ===== 清障车/破障能力属性 =====
     can_crush_bricks: bool = False     # 允许无视普通砖块直接碾压过去
     crush_speed_factor: float = 0.5    # 碾压普通砖块时的速度衰减系数 (如 0.5 表示移速降低为 50%)
+    # ===== 资源转换机与采集属性 =====
+    converter_table: list = field(default_factory=list)  # 支持的转换配方 ID 列表
+    harvest_speed: dict = field(default_factory=lambda: {"dark_matter": 2.0, "alloy": 1.5})  # 各类资源采集速度 (单位/秒)
 
     @classmethod
     def from_json(cls, file_path: str or Path) -> "TankConfig":
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
+        if "converter_table" not in data:
+            data["converter_table"] = []
+        if "harvest_speed" not in data:
+            data["harvest_speed"] = {"dark_matter": 2.0, "alloy": 1.5}
         return cls(**data)
 
     def to_json(self, file_path: str or Path) -> None:

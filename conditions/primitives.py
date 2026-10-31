@@ -7,9 +7,10 @@ from map_loader.models import GameMap
 class ConditionContext:
     """胜负条件评估上下文环境"""
 
-    def __init__(self, physics_engine, game_map: GameMap):
+    def __init__(self, physics_engine, game_map: GameMap, resource_manager=None):
         self.physics_engine = physics_engine
         self.game_map = game_map
+        self.resource_manager = resource_manager
         self.elapsed_time: float = 0.0  # 游戏运行累计秒数
         # 记录每个单位的当前存活秒数 (只要还活着就增加)
         self.unit_alive_seconds: Dict[str, float] = {}
@@ -143,3 +144,24 @@ class AllPlayersDestroyedCondition(BaseCondition):
 
     def get_description(self) -> str:
         return "我方所有装甲部队覆灭"
+
+
+class ResourceAmountCondition(BaseCondition):
+    """
+    经济原语：特定资源数量达到或超过指定值
+    - resource_type: "dark_matter", "alloy", etc.
+    - amount: 目标阈值
+    """
+    def __init__(self, resource_type: str, amount: float, camp: str = "player"):
+        self.resource_type = str(resource_type).strip()
+        self.amount = float(amount)
+        self.camp = str(camp)
+
+    def evaluate(self, ctx: ConditionContext) -> bool:
+        if ctx.resource_manager is None:
+            return False
+        return ctx.resource_manager.get_amount(self.resource_type, camp=self.camp) >= self.amount
+
+    def get_description(self) -> str:
+        res_display = "暗物质" if self.resource_type == "dark_matter" else ("合金" if self.resource_type == "alloy" else self.resource_type)
+        return f"拥有资源 [{res_display}] 达到 {self.amount:g}"

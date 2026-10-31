@@ -170,7 +170,7 @@ class PhysicsEngine:
             for col in range(col_start, col_end + 1):
                 tile = self.game_map.get_tile(col, row)
                 # 若坦克具备碾压砖块能力，普通砖块不作为阻碍
-                blocks = (TileType.STEEL, TileType.BASE) if can_crush else (TileType.BRICK, TileType.STEEL, TileType.BASE)
+                blocks = (TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY) if can_crush else (TileType.BRICK, TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY)
                 if tile in blocks:
                     tile_rect = Rect(col * tile_size, row * tile_size, tile_size, tile_size)
                     if tank_rect.collides_with(tile_rect):
@@ -252,7 +252,7 @@ class PhysicsEngine:
         移动坦克（支持四向枚举、任意浮点角度 0~360°、或 2D 向量元组 (dx, dy)）
         支持自由旋转、平滑全向机动、碾压普通砖块速度衰减与贴墙滑动 (Wall Sliding)
         """
-        if not tank.alive or tank.is_tower or tank.speed <= 0:
+        if not tank.alive or tank.is_tower or tank.speed <= 0 or getattr(tank, "is_converting", False):
             return False
 
         tile_size = self.game_map.tile_size
@@ -419,7 +419,7 @@ class PhysicsEngine:
             for row in range(row_start, row_end + 1):
                 for col in range(col_start, col_end + 1):
                     tile = self.game_map.get_tile(col, row)
-                    if tile in (TileType.BRICK, TileType.STEEL, TileType.BASE):
+                    if tile in (TileType.BRICK, TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY):
                         tile_rect = Rect(col * tile_size, row * tile_size, tile_size, tile_size)
                         if bullet_rect.collides_with(tile_rect):
                             hit_obstacle = True

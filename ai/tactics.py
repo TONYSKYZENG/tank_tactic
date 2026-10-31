@@ -1,6 +1,7 @@
+import math
 import random
 from abc import ABC, abstractmethod
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any
 from physics.entities import Tank, Direction, Camp
 from map_loader.models import GameMap, TileType
 
@@ -12,9 +13,11 @@ class BaseTactic(ABC):
         # 转向锁定计时器：防止高频抖动转向
         self.direction_lock: int = 0
         self.blocked_counter: int = 0
+        self.evade_side: float = 1.0
+        self.current_angle: Optional[float] = None
 
     @abstractmethod
-    def decide(self, tank: Tank, physics_engine, game_map: GameMap) -> Tuple[Optional[Direction], bool]:
+    def decide(self, tank: Tank, physics_engine, game_map: GameMap) -> Tuple[Optional[Any], bool]:
         pass
 
     @staticmethod
@@ -39,7 +42,7 @@ class BaseTactic(ABC):
     @staticmethod
     def is_line_of_sight_clear(x1: float, y1: float, x2: float, y2: float,
                                game_map: GameMap) -> bool:
-        """检查两点间视线是否被不可穿透的铁墙或砖墙阻挡"""
+        """检查两点间 360° 视线是否被不可穿透的铁墙或砖墙阻挡"""
         tile_size = game_map.tile_size
         col1, row1 = int(x1 // tile_size), int(y1 // tile_size)
         col2, row2 = int(x2 // tile_size), int(y2 // tile_size)
@@ -47,16 +50,49 @@ class BaseTactic(ABC):
         if col1 == col2:
             step = 1 if row2 > row1 else -1
             for r in range(row1 + step, row2, step):
-                if game_map.get_tile(col1, r) in (TileType.BRICK, TileType.STEEL):
-                    return False
+                if 0 <= col1 < game_map.cols and 0 <= r < game_map.rows:
+                    if game_map.get_tile(col1, r) in (TileType.BRICK, TileType.STEEL):
+                        return False
             return True
         elif row1 == row2:
             step = 1 if col2 > col1 else -1
             for c in range(col1 + step, col2, step):
-                if game_map.get_tile(c, row1) in (TileType.BRICK, TileType.STEEL):
-                    return False
+                if 0 <= c < game_map.cols and 0 <= row1 < game_map.rows:
+                    if game_map.get_tile(c, row1) in (TileType.BRICK, TileType.STEEL):
+                        return False
             return True
-        return False
+
+        dx = x2 - x1
+        dy = y2 - y1
+        dist = math.hypot(dx, dy)
+        if dist < 1.0:
+            return True
+        steps = max(2, int(dist / (tile_size * 0.4)))
+        for i in range(1, steps):
+            t = i / float(steps)
+            c = int((x1 + dx * t) // tile_size)
+            r = int((y1 + dy * t) // tile_size)
+            if 0 <= c < game_map.cols and 0 <= r < game_map.rows:
+                if game_map.get_tile(c, r) in (TileType.BRICK, TileType.STEEL):
+                    return False
+        return True
+
+    def _find_steered_angle(self, tank: Tank, target_angle: float, physics_engine) -> Optional[float]:
+        """沿目标角度及两侧扇形寻找可通行的斜向/侧向移动角度"""
+        step = max(1.0, tank.speed)
+        rad0 = math.radians(target_angle)
+        if physics_engine.can_move_to(tank, tank.x + math.sin(rad0) * step, tank.y - math.cos(rad0) * step):
+            return target_angle
+
+        fan = [25.0, 45.0, 65.0, 90.0, 120.0, 150.0]
+        offsets = [a * self.evade_side for a in fan] + [a * (-self.evade_side) for a in fan]
+        for off in offsets:
+            cand = (target_angle + off) % 360.0
+            rad = math.radians(cand)
+            if physics_engine.can_move_to(tank, tank.x + math.sin(rad) * step, tank.y - math.cos(rad) * step):
+                self.evade_side = 1.0 if off > 0 else -1.0
+                return cand
+        return None
 
 
 class PatrolTactic(BaseTactic):
@@ -130,16 +166,14 @@ class PatrolTactic(BaseTactic):
 class ChargeBaseTactic(BaseTactic):
     """
     战术2：突袭基地战术
-    - 锁定下方老鹰基地，坚定不移向下与向中心推进；
-    - 遇到砖墙挡路直接开火轰开道路；
-    - 带有方向锁定，防止高频震荡抽搐。
+    - 锁定下方老鹰基地，直接沿斜向最优角度向基地推进；
+    - 遇到砖墙挡路直接开火轰开道路，遇不可穿透障碍时扇形避障绕行。
     """
     def __init__(self, tank_config=None):
         super().__init__(tank_config)
-        self.direction_lock = 25
+        self.direction_lock = 15
 
-    def decide(self, tank: Tank, physics_engine, game_map: GameMap) -> Tuple[Optional[Direction], bool]:
-        # 锁定我方的核心防御塔 (原鹰巢基地)
+    def decide(self, tank: Tank, physics_engine, game_map: GameMap) -> Tuple[Optional[Any], bool]:
         target_tower = None
         for pt in physics_engine.player_tanks:
             if pt.alive and pt.is_tower and pt.tower_type == "supply":
@@ -151,7 +185,6 @@ class ChargeBaseTactic(BaseTactic):
                     target_tower = pt
                     break
 
-        # 防御塔全灭后，转为突击追杀剩余的我方活动战车，确保持续进攻
         if not target_tower:
             alive_pts = [t for t in physics_engine.player_tanks if t.alive]
             if alive_pts:
@@ -164,65 +197,36 @@ class ChargeBaseTactic(BaseTactic):
             base_x = game_map.pixel_width / 2.0
             base_y = game_map.pixel_height - game_map.tile_size
 
-        should_fire = False
+        cx = tank.x + tank.size / 2.0
+        cy = tank.y + tank.size / 2.0
+        dx = base_x - cx
+        dy = base_y - cy
+        target_angle = math.degrees(math.atan2(dx, -dy)) % 360.0 if math.hypot(dx, dy) > 1e-4 else tank.angle
 
-        # 检查当前方向能否前进
-        test_x = tank.x + tank.direction.dx * tank.speed
-        test_y = tank.y + tank.direction.dy * tank.speed
-        can_continue = physics_engine.can_move_to(tank, test_x, test_y)
+        if self.is_line_of_sight_clear(cx, cy, base_x, base_y, game_map):
+            tank.angle = target_angle
+            steered = self._find_steered_angle(tank, target_angle, physics_engine)
+            return (steered if steered is not None else target_angle), True
 
-        if not can_continue:
-            self.blocked_counter += 1
-            should_fire = True
-        else:
-            self.blocked_counter = 0
+        steered = self._find_steered_angle(tank, target_angle, physics_engine)
+        if steered is not None:
+            return steered, (abs(steered - target_angle) > 20.0)
 
-        # 锁定期内且可走则继续走
-        if can_continue and self.direction_lock > 0:
-            self.direction_lock -= 1
-            return tank.direction, should_fire
-
-        # 重新评估最佳前进方向
-        self.direction_lock = 30
-        dx = base_x - (tank.x + tank.size / 2.0)
-        dy = base_y - (tank.y + tank.size / 2.0)
-
-        preferred: List[Direction] = []
-        if dy > tank.size * 0.5:
-            preferred.append(Direction.DOWN)
-        if abs(dx) > tank.size * 0.5:
-            preferred.append(Direction.RIGHT if dx > 0 else Direction.LEFT)
-
-        # 补充其他方向
-        for d in (Direction.DOWN, Direction.LEFT, Direction.RIGHT, Direction.UP):
-            if d not in preferred:
-                preferred.append(d)
-
-        # 依次寻找可行方向
-        for d in preferred:
-            tx = tank.x + d.dx * tank.speed
-            ty = tank.y + d.dy * tank.speed
-            if physics_engine.can_move_to(tank, tx, ty):
-                tank.direction = d
-                return tank.direction, should_fire
-
-        # 都受阻时保持首选方向并开火破障
-        tank.direction = preferred[0]
-        return tank.direction, True
+        tank.angle = target_angle
+        return target_angle, True
 
 
 class HunterTactic(BaseTactic):
     """
     战术3：猎杀追踪战术
-    - 追踪玩家坦克坐标；
-    - 视线对齐时果断瞄准并连续开火；
-    - 移动带有防抖防抽搐锁定，保持稳定跟进。
+    - 追踪玩家坦克坐标，支持 360° 斜向视线瞄准与斜线直达追击；
+    - 遇阻挡时使用多角度扇形动态避障。
     """
     def __init__(self, tank_config=None):
         super().__init__(tank_config)
-        self.direction_lock = 20
+        self.direction_lock = 15
 
-    def decide(self, tank: Tank, physics_engine, game_map: GameMap) -> Tuple[Optional[Direction], bool]:
+    def decide(self, tank: Tank, physics_engine, game_map: GameMap) -> Tuple[Optional[Any], bool]:
         player = physics_engine.player_tank
         if not player or not player.alive:
             alive_pts = [t for t in physics_engine.player_tanks if t.alive]
@@ -231,64 +235,28 @@ class HunterTactic(BaseTactic):
             else:
                 return tank.direction, False
 
-        should_fire = False
         center_x = tank.x + tank.size / 2.0
         center_y = tank.y + tank.size / 2.0
         p_center_x = player.x + player.size / 2.0
         p_center_y = player.y + player.size / 2.0
 
-        align_threshold = tank.size * 0.65
         dx = p_center_x - center_x
         dy = p_center_y - center_y
+        dist = math.hypot(dx, dy)
+        target_angle = math.degrees(math.atan2(dx, -dy)) % 360.0 if dist > 1e-4 else tank.angle
 
-        # 1. 优先检查是否与玩家对齐（同一行或同一列）
-        is_aligned_v = abs(dx) < align_threshold
-        is_aligned_h = abs(dy) < align_threshold
+        # 1. 360° 视线畅通时直接对准开火并斜向逼近
+        if self.is_line_of_sight_clear(center_x, center_y, p_center_x, p_center_y, game_map):
+            tank.angle = target_angle
+            if dist <= tank.size * 1.6:
+                return None, True
+            steered = self._find_steered_angle(tank, target_angle, physics_engine)
+            return (steered if steered is not None else target_angle), True
 
-        if is_aligned_v:
-            target_dir = Direction.DOWN if dy > 0 else Direction.UP
-            tank.direction = target_dir
-            if self.is_line_of_sight_clear(center_x, center_y, p_center_x, p_center_y, game_map):
-                should_fire = True
-            return tank.direction, should_fire
+        # 2. 视线受阻时沿斜向 + 动态扇形避障追击玩家
+        steered = self._find_steered_angle(tank, target_angle, physics_engine)
+        if steered is not None:
+            return steered, False
 
-        if is_aligned_h:
-            target_dir = Direction.RIGHT if dx > 0 else Direction.LEFT
-            tank.direction = target_dir
-            if self.is_line_of_sight_clear(center_x, center_y, p_center_x, p_center_y, game_map):
-                should_fire = True
-            return tank.direction, should_fire
-
-        # 2. 未对齐时向玩家移动
-        test_x = tank.x + tank.direction.dx * tank.speed
-        test_y = tank.y + tank.direction.dy * tank.speed
-        can_continue = physics_engine.can_move_to(tank, test_x, test_y)
-
-        if can_continue and self.direction_lock > 0:
-            self.direction_lock -= 1
-            return tank.direction, should_fire
-
-        self.direction_lock = 25
-
-        # 确定主副方向
-        if abs(dx) > abs(dy):
-            primary = Direction.RIGHT if dx > 0 else Direction.LEFT
-            secondary = Direction.DOWN if dy > 0 else Direction.UP
-        else:
-            primary = Direction.DOWN if dy > 0 else Direction.UP
-            secondary = Direction.RIGHT if dx > 0 else Direction.LEFT
-
-        candidates = [primary, secondary]
-        for d in Direction.all_directions():
-            if d not in candidates:
-                candidates.append(d)
-
-        for d in candidates:
-            tx = tank.x + d.dx * tank.speed
-            ty = tank.y + d.dy * tank.speed
-            if physics_engine.can_move_to(tank, tx, ty):
-                tank.direction = d
-                return tank.direction, should_fire
-
-        # 被阻挡时开火破障
-        return tank.direction, True
+        tank.angle = target_angle
+        return target_angle, True

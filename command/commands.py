@@ -1,8 +1,8 @@
 import math
 import random
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, List, Any
-from physics.entities import Tank, Direction, Camp
+from typing import Optional, Tuple, List, Any, Set
+from physics.entities import Tank, Direction, Camp, Rect
 from map_loader.models import GameMap, TileType
 from .pathfinder import GridPathfinder
 
@@ -58,10 +58,15 @@ class BaseCommand(ABC):
 
 class MoveCommand(BaseCommand):
     """
-    智能 A* 移动到目标点命令：
+    智能 A* 斜向直达移动与动态避障命令：
+    - 支持八方向 A* 与任意角度视线拉直 (Any-Angle String Pulling)，直接沿斜线行进至目标；
     - 当无限弹药时：自动破障，以极小时间开销直接炸开砖墙，直达目标；
-    - 当有限弹药时：自动计算最省弹药的破障办法，优先零耗弹绕过障碍；若必须破障，选择摧毁砖块数绝对最少的路线。
-    - 动态避碰与死锁防卡死机制：遇其他单位阻挡时自动侧向回避、A* 绕行或主动让行，杜绝碰撞死锁。
+    - 当有限弹药时：自动计算最省弹药的破障办法，优先零耗弹绕过障碍；若必须破障，选择摧毁砖块数绝对最少的路线；
+    - 多级动态避障系统：
+      1. 预判感知：对己方驻守/采矿/转换单位及阻挡单位进行 Minkowski 包围盒网格膨胀回避；
+      2. 前瞻引导与多角度扇形局部避障 (Context Steering)：遇动态障碍时按相对方位与右侧通行法则锁定绕行方向，优先选择斜向切角全速绕行，彻底消除左右抽搐与貼脸往复滑动；
+      3. 动态视线前瞻捷径 (Dynamic Lookahead)：绕过障碍后立即斜向切入后续航点，无需折返原航点；
+      4. 窄道会车让行：单格窄巷迎头死锁时低优先级单位自动寻找侧方避让口或倒车让道。
     """
     def __init__(self, dest_x: float, dest_y: float, tolerance: float = 8.0,
                  auto_clear_path: bool = True):
@@ -73,26 +78,39 @@ class MoveCommand(BaseCommand):
         self.path_idx: int = 0
         self.stuck_frames: int = 0
         self.total_stuck_frames: int = 0
+        self.impeded_frames: int = 0
         self.replan_timer: int = 0
         self.ammo_needed: int = 0
         self.pathfinder: Optional[GridPathfinder] = None
         self.blocking_tank_id: Optional[str] = None
+        self.evade_side: float = 0.0
+        self.evade_lock_timer: int = 0
         self.yield_timer: int = 0
         self.yield_direction: Optional[Direction] = None
+        self.yield_angle: Optional[float] = None
 
     def _check_front_has_brick(self, tank: Tank, direction: Direction,
-                               game_map: GameMap) -> bool:
+                               game_map: GameMap, move_angle: Optional[float] = None) -> bool:
         tile_size = game_map.tile_size
         ahead = 6.0
-        # 仅检测坦克正前方通道范围内的障碍砖块，避免侧向边缘误差判定
+        check_points = []
         if direction in (Direction.UP, Direction.DOWN):
             cy = tank.y + (tank.size + ahead if direction == Direction.DOWN else -ahead)
             cx = tank.x + tank.size / 2.0
-            check_points = [(cx, cy), (tank.x + 8.0, cy), (tank.x + tank.size - 8.0, cy)]
+            check_points.extend([(cx, cy), (tank.x + 8.0, cy), (tank.x + tank.size - 8.0, cy)])
         else:
             cx = tank.x + (tank.size + ahead if direction == Direction.RIGHT else -ahead)
             cy = tank.y + tank.size / 2.0
-            check_points = [(cx, cy), (cx, tank.y + 8.0), (cx, tank.y + tank.size - 8.0)]
+            check_points.extend([(cx, cy), (cx, tank.y + 8.0), (cx, tank.y + tank.size - 8.0)])
+
+        if move_angle is not None:
+            rad = math.radians(move_angle)
+            ux = math.sin(rad)
+            uy = -math.cos(rad)
+            center_x = tank.x + tank.size / 2.0
+            center_y = tank.y + tank.size / 2.0
+            reach = tank.size / 2.0 + ahead
+            check_points.append((center_x + ux * reach, center_y + uy * reach))
 
         for px, py in check_points:
             col = int(px // tile_size)
@@ -100,6 +118,122 @@ class MoveCommand(BaseCommand):
             if 0 <= col < game_map.cols and 0 <= row < game_map.rows:
                 if game_map.get_tile(col, row) == TileType.BRICK:
                     return True
+        return False
+
+    def _collect_avoid_tiles(self, tank: Tank, physics_engine, game_map: GameMap) -> Set[Tuple[int, int]]:
+        """
+        构建动态障碍物的 Minkowski 膨胀回避网格集合：
+        - 主动避开己方固定建筑、正在采矿或转换的驻留单位；
+        - 避开当前造成阻挡的单位及受阻时周边的拥挤单位；
+        - 将被避让单位的包围盒按本车尺寸膨胀映射到网格，确保规划出的绕行路径物理上绝不擦碰。
+        """
+        tile_size = game_map.tile_size
+        start_c = int(round(tank.x / tile_size))
+        start_r = int(round(tank.y / tile_size))
+        goal_c = int(round(self.dest_x / tile_size))
+        goal_r = int(round(self.dest_y / tile_size))
+
+        avoid_tiles: Set[Tuple[int, int]] = set()
+        is_impeded = (self.stuck_frames >= 2 or self.impeded_frames >= 3)
+
+        for other in physics_engine.get_all_active_tanks():
+            if other is tank or not other.alive:
+                continue
+
+            should_avoid = False
+            if self.blocking_tank_id and other.id == self.blocking_tank_id:
+                should_avoid = True
+            elif is_impeded and math.hypot(other.x - tank.x, other.y - tank.y) < tile_size * 3.2:
+                should_avoid = True
+            elif other.camp == tank.camp and (
+                other.is_tower or
+                getattr(other, "is_converting", False) or
+                getattr(other, "is_harvesting", False)
+            ):
+                should_avoid = True
+
+            if should_avoid:
+                c_min = max(0, int((other.x - tank.size + 2.0) // tile_size))
+                c_max = min(game_map.cols - 1, int((other.x + other.size - 2.0) // tile_size))
+                r_min = max(0, int((other.y - tank.size + 2.0) // tile_size))
+                r_max = min(game_map.rows - 1, int((other.y + other.size - 2.0) // tile_size))
+                for r in range(r_min, r_max + 1):
+                    for c in range(c_min, c_max + 1):
+                        if (c, r) != (start_c, start_r) and (c, r) != (goal_c, goal_r):
+                            avoid_tiles.add((c, r))
+
+        return avoid_tiles
+
+    def _is_corridor_blocked_by_tank(self, tank: Tank, x2: float, y2: float,
+                                     physics_engine, max_check_dist: float = 96.0) -> bool:
+        """检测从当前位置直达 (x2, y2) 的近期扫掠走廊内是否有其他坦克阻挡"""
+        dx = x2 - tank.x
+        dy = y2 - tank.y
+        dist = math.hypot(dx, dy)
+        if dist < 1e-3:
+            return False
+        check_d = min(dist, max_check_dist)
+        steps = max(1, int(math.ceil(check_d / max(4.0, tank.size * 0.35))))
+        ux = dx / dist
+        uy = dy / dist
+        for i in range(1, steps + 1):
+            d = (check_d * i) / float(steps)
+            if physics_engine.get_blocking_tank(tank, tank.x + ux * d, tank.y + uy * d) is not None:
+                return True
+        return False
+
+    def _steer_around_obstacle(self, tank: Tank, blocking_tank: Optional[Tank],
+                               move_angle: float, physics_engine) -> bool:
+        """
+        多角度扇形局部动态避障 (Context Steering)：
+        - 根据阻挡坦克相对航向的横向偏置 (side_dot) 与右侧通行法则确定最优绕行侧；
+        - 在锁定期内保持绕行侧向一致，防止左右高频摇摆抖动；
+        - 优先从最小偏角 (25° -> 45° -> 65° -> 90° -> 115° -> 135°) 探测可全速无碰撞通行的斜向角度，实现平滑切角绕障。
+        """
+        if blocking_tank is not None:
+            if self.evade_lock_timer > 0 and self.blocking_tank_id == blocking_tank.id and self.evade_side != 0.0:
+                prefer_sign = self.evade_side
+            else:
+                rad = math.radians(move_angle)
+                ux = math.sin(rad)
+                uy = -math.cos(rad)
+                # 右手法则法向量 n_right = (-uy, ux)
+                my_cx = tank.x + tank.size / 2.0
+                my_cy = tank.y + tank.size / 2.0
+                ot_cx = blocking_tank.x + blocking_tank.size / 2.0
+                ot_cy = blocking_tank.y + blocking_tank.size / 2.0
+                rel_x = ot_cx - my_cx
+                rel_y = ot_cy - my_cy
+                side_dot = rel_x * (-uy) + rel_y * ux
+                # 若障碍物中心偏右 (side_dot > 2.0)，向左 (-1) 绕行更近；若偏左或迎头正对，向右 (+1，右侧通行法则) 绕行
+                prefer_sign = -1.0 if side_dot > 2.0 else 1.0
+                self.evade_side = prefer_sign
+            self.blocking_tank_id = blocking_tank.id
+            self.evade_lock_timer = 16
+        else:
+            prefer_sign = self.evade_side if self.evade_side != 0.0 else 1.0
+
+        fan_Steps = [25.0, 45.0, 65.0, 90.0, 115.0, 135.0]
+        candidate_offsets = [ang * prefer_sign for ang in fan_Steps] + [ang * (-prefer_sign) for ang in fan_Steps]
+
+        # 第一遍：优先寻找能完整步进（不依赖贴墙降速滑动）的畅通斜向角度
+        step_dist = max(1.0, tank.speed)
+        for offset in candidate_offsets:
+            cand_angle = (move_angle + offset) % 360.0
+            rad = math.radians(cand_angle)
+            nx = tank.x + math.sin(rad) * step_dist
+            ny = tank.y - math.cos(rad) * step_dist
+            if physics_engine.can_move_to(tank, nx, ny):
+                if physics_engine.move_tank(tank, cand_angle):
+                    self.evade_side = 1.0 if offset > 0 else -1.0
+                    return True
+
+        # 第二遍：窄角受限时允许利用物理引擎贴墙滑动脱困
+        for offset in [90.0 * prefer_sign, -90.0 * prefer_sign, 135.0 * prefer_sign, -135.0 * prefer_sign, 180.0]:
+            cand_angle = (move_angle + offset) % 360.0
+            if physics_engine.move_tank(tank, cand_angle):
+                return True
+
         return False
 
     def execute(self, tank: Tank, physics_engine, game_map: GameMap) -> bool:
@@ -117,30 +251,27 @@ class MoveCommand(BaseCommand):
 
         tile_size = game_map.tile_size
 
-        # 让行倒车缓冲期：当两辆友军对撞死锁时，低优先级战车后退让道
+        if self.evade_lock_timer > 0:
+            self.evade_lock_timer -= 1
+
+        # 让行倒车缓冲期：当两辆友军在窄道对撞死锁时，低优先级战车优先切入侧方避让口或后退让道
         if self.yield_timer > 0:
             self.yield_timer -= 1
-            if self.yield_direction:
+            if self.yield_angle is not None:
+                # 若侧方出现空位，立即切入侧方让出主干道
+                for side_off in (90.0, -90.0, 60.0, -60.0, 0.0, 35.0, -35.0):
+                    cand_a = (self.yield_angle + side_off) % 360.0
+                    rad = math.radians(cand_a)
+                    if physics_engine.can_move_to(tank, tank.x + math.sin(rad) * tank.speed, tank.y - math.cos(rad) * tank.speed):
+                        physics_engine.move_tank(tank, cand_a)
+                        break
+            elif self.yield_direction:
                 physics_engine.move_tank(tank, self.yield_direction)
             return False
 
         # 路径规划与自适应周期重规划
         if self.path is None or self.replan_timer <= 0:
-            avoid_tiles = set()
-            if self.blocking_tank_id:
-                for other in physics_engine.get_all_active_tanks():
-                    if other.id == self.blocking_tank_id and other.alive:
-                        avoid_tiles.add((int(round(other.x / tile_size)), int(round(other.y / tile_size))))
-                        break
-
-            # 若卡死帧数累积，把周围 2 格范围内的其他坦克格子全部加入回避列表促使大范围绕道
-            if self.stuck_frames > 6:
-                for other in physics_engine.get_all_active_tanks():
-                    if other != tank and other.alive:
-                        d = math.hypot(other.x - tank.x, other.y - tank.y)
-                        if d < tile_size * 2.5:
-                            avoid_tiles.add((int(round(other.x / tile_size)), int(round(other.y / tile_size))))
-
+            avoid_tiles = self._collect_avoid_tiles(tank, physics_engine, game_map)
             self.path, self.ammo_needed = self.pathfinder.find_path(
                 tank.x, tank.y, self.dest_x, self.dest_y,
                 tank=tank,
@@ -148,20 +279,34 @@ class MoveCommand(BaseCommand):
                 avoid_tiles=avoid_tiles if avoid_tiles else None
             )
             self.path_idx = 0
-            self.replan_timer = 40
+            self.replan_timer = 35
 
         self.replan_timer -= 1
 
-        # 沿路径航点向前推进：确保真正达到当前航点后才切入垂直拐弯，杜绝过早拐弯刮蹭拐角砖块
-        wp_reach_dist = max(3.0, tank.speed * 1.1)
+        # 动态视线前瞻捷径 (Dynamic Lookahead)：若当前位置可直接斜向无阻通往后续航点，立即跳过中间过渡点
+        can_crush = getattr(tank, "can_crush_bricks", False)
+        while self.path_idx + 1 < len(self.path):
+            curr_wx, curr_wy = self.path[self.path_idx]
+            curr_c, curr_r = int(round(curr_wx / tile_size)), int(round(curr_wy / tile_size))
+            if not can_crush and 0 <= curr_c < game_map.cols and 0 <= curr_r < game_map.rows:
+                if game_map.get_tile(curr_c, curr_r) == TileType.BRICK:
+                    break
+            next_wx, next_wy = self.path[self.path_idx + 1]
+            if (self.pathfinder.is_segment_passable(tank.x, tank.y, next_wx, next_wy, tank=tank) and
+                    not self._is_corridor_blocked_by_tank(tank, next_wx, next_wy, physics_engine)):
+                self.path_idx += 1
+            else:
+                break
+
+        # 沿路径航点向前推进
+        wp_reach_dist = max(3.5, tank.speed * 1.15)
 
         while self.path_idx < len(self.path):
             wx, wy = self.path[self.path_idx]
             dist_to_wp = math.hypot(wx - tank.x, wy - tank.y)
             if dist_to_wp <= wp_reach_dist:
-                if abs(tank.x - wx) <= wp_reach_dist:
+                if physics_engine.can_move_to(tank, wx, wy):
                     tank.x = wx
-                if abs(tank.y - wy) <= wp_reach_dist:
                     tank.y = wy
                 self.path_idx += 1
             else:
@@ -190,53 +335,72 @@ class MoveCommand(BaseCommand):
 
         # 检测前路是否有砖块障碍待破障 (Auto-Breaching)
         # 若具备碾压砖块能力（清障车），则无视普通砖块直接碾压开赴，不需要停下开火破障
-        if not getattr(tank, "can_crush_bricks", False):
+        if not can_crush:
             target_col = int(round(target_x / tile_size))
             target_row = int(round(target_y / tile_size))
             next_is_brick = (0 <= target_col < game_map.cols and 0 <= target_row < game_map.rows and
                              game_map.get_tile(target_col, target_row) == TileType.BRICK)
 
-            if next_is_brick or self._check_front_has_brick(tank, primary, game_map):
+            if next_is_brick or self._check_front_has_brick(tank, primary, game_map, move_angle=move_angle):
                 tank.angle = move_angle
                 if tank.can_fire(physics_engine.limited_ammo_enabled):
                     physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=move_angle)
                 return False
 
-        # 自由全向推进机动
-        moved = physics_engine.move_tank(tank, (dx, dy))
-        blocking_tank = None
+        # 前瞻与即时碰撞检测：识别正前方是否被其他坦克阻挡
+        ux = dx / dist_to_target if dist_to_target > 1e-4 else 0.0
+        uy = dy / dist_to_target if dist_to_target > 1e-4 else 0.0
+        step_x = tank.x + ux * tank.speed
+        step_y = tank.y + uy * tank.speed
+        blocking_tank = physics_engine.get_blocking_tank(tank, step_x, step_y)
 
-        if not moved:
-            step_x = tank.x + (dx / dist_to_target if dist_to_target > 0 else 0) * tank.speed
-            step_y = tank.y + (dy / dist_to_target if dist_to_target > 0 else 0) * tank.speed
-            blocking_tank = physics_engine.get_blocking_tank(tank, step_x, step_y)
+        # 对友军单位启用前瞻预判避障（在相撞前约 2.2 步距离提前平滑斜向切角分流）
+        if blocking_tank is None and dist_to_target > tank.speed * 1.2:
+            lookahead = min(dist_to_target, max(tank.speed * 2.2, 8.0))
+            ahead_tank = physics_engine.get_blocking_tank(tank, tank.x + ux * lookahead, tank.y + uy * lookahead)
+            if ahead_tank is not None and ahead_tank.camp == tank.camp:
+                blocking_tank = ahead_tank
 
+        moved = False
+        if blocking_tank is not None:
             # 阻挡者为敌军时，主动朝敌军开火迎击
-            if blocking_tank and blocking_tank.camp != tank.camp:
+            if blocking_tank.camp != tank.camp:
                 tank.angle = move_angle
                 if tank.can_fire(physics_engine.limited_ammo_enabled):
                     physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=move_angle)
 
-        # 侧向滑步规避脱困 (Lateral Evasion)
-        if not moved and blocking_tank:
-            self.blocking_tank_id = blocking_tank.id
-            lateral_angles = [(move_angle + 90.0) % 360.0, (move_angle - 90.0) % 360.0]
-            for l_angle in lateral_angles:
-                if physics_engine.move_tank(tank, l_angle):
-                    moved = True
-                    break
+            # 执行智能多角度局部避障（禁止盲目贴墙回滑抵消侧移）
+            moved = self._steer_around_obstacle(tank, blocking_tank, move_angle, physics_engine)
+            self.impeded_frames += 1
+
+            # 若持续受阻绕行满 5 帧，立即将阻挡单位加入回避网格触发全局 A* 重规划
+            if self.impeded_frames >= 5:
+                self.path = None
+                self.replan_timer = 0
+                self.impeded_frames = 0
+        else:
+            # 前方无动态单位阻挡，执行自由全向斜线推进
+            moved = physics_engine.move_tank(tank, (dx, dy))
+            if not moved:
+                # 静态墙角微擦碰时，尝试小角度扇形切入脱困
+                moved = self._steer_around_obstacle(tank, None, move_angle, physics_engine)
+                self.impeded_frames += 1
+            else:
+                self.impeded_frames = max(0, self.impeded_frames - 1)
+                if self.evade_lock_timer <= 0:
+                    self.blocking_tank_id = None
 
         if not moved:
             self.stuck_frames += 1
             self.total_stuck_frames += 1
 
-            # 触发即时重寻路（带回避方格）
-            if self.stuck_frames > 6:
+            # 触发即时重寻路（带膨胀回避方格）
+            if self.stuck_frames > 4:
                 self.path = None
                 self.replan_timer = 0
 
-            # 对撞死锁主动让行：若两辆友军对头卡死超过 18 帧，ID 较大的坦克倒车让道
-            if self.stuck_frames > 18 and blocking_tank and blocking_tank.camp == tank.camp:
+            # 对撞死锁主动让行：若两辆友军在窄道卡死超过 10 帧，ID 较大的坦克主动避让/倒车让道
+            if self.stuck_frames > 10 and blocking_tank and blocking_tank.camp == tank.camp:
                 if str(tank.id) > str(blocking_tank.id):
                     rev_dir = Direction.DOWN if primary == Direction.UP else (
                         Direction.UP if primary == Direction.DOWN else (
@@ -244,8 +408,13 @@ class MoveCommand(BaseCommand):
                         )
                     )
                     self.yield_direction = rev_dir
-                    self.yield_timer = 12
+                    self.yield_angle = (move_angle + 180.0) % 360.0
+                    self.yield_timer = 14
                     self.stuck_frames = 0
+
+            # 若目的地紧邻处已被其他友军占据且本车已贴近目的地周围，判定为已就位，防止终点无限顶牛
+            if dist_to_final <= tank.size * 1.35 and self.stuck_frames > 10:
+                return True
 
             # 长期彻底卡死堵塞（>70 帧约 1.1s），放弃本次寻路，令上层切换阵位或换目标
             if self.total_stuck_frames > 70:
@@ -253,15 +422,19 @@ class MoveCommand(BaseCommand):
                 return True
         else:
             self.stuck_frames = 0
-            self.total_stuck_frames = 0
-            self.blocking_tank_id = None
+            if blocking_tank is None:
+                self.total_stuck_frames = 0
+
+        # 若终点已被友军驻留且本车已在终点旁持续绕行，提前结束移动
+        if dist_to_final <= tank.size * 1.25 and self.impeded_frames > 12:
+            return True
 
         return False
 
 
 class AttackTargetCommand(BaseCommand):
     """
-    集火攻击目标命令 (基于 A* 智能机动占位与最省弹药破障)
+    集火攻击目标命令 (基于 A* 斜向机动占位与最省弹药破障)
     """
     def __init__(self, target_tank: Tank, auto_clear_path: bool = True):
         self.target_tank = target_tank
@@ -343,7 +516,7 @@ class AttackTargetCommand(BaseCommand):
                 physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=target_angle)
             return False
 
-        # 4. 寻找进攻占位阵位 (Standoff Attack Position)
+        # 4. 寻找进攻占位阵位 (Standoff Attack Position，支持八方向环绕包抄)
         tx, ty = self.target_tank.x, self.target_tank.y
         dist_moved = math.hypot(self.last_target_pos[0] - tx, self.last_target_pos[1] - ty)
 
@@ -364,14 +537,16 @@ class AttackTargetCommand(BaseCommand):
 
             c_target = int(round(tx / tile_size))
             r_target = int(round(ty / tile_size))
-            c_me = int(round(tank.x / tile_size))
-            r_me = int(round(tank.y / tile_size))
 
             standoff_candidates = [
                 (c_target, r_target - 1),
                 (c_target, r_target + 1),
                 (c_target - 1, r_target),
                 (c_target + 1, r_target),
+                (c_target - 1, r_target - 1),
+                (c_target + 1, r_target - 1),
+                (c_target - 1, r_target + 1),
+                (c_target + 1, r_target + 1),
             ]
             valid_candidates = []
             allied_tanks = physics_engine.player_tanks if tank.camp == Camp.PLAYER else physics_engine.enemy_tanks
@@ -379,13 +554,18 @@ class AttackTargetCommand(BaseCommand):
                 if 0 <= sc < game_map.cols and 0 <= sr < game_map.rows:
                     tile = game_map.get_tile(sc, sr)
                     if tile != TileType.STEEL:
-                        d = float(abs(sc - c_me) + abs(sr - r_me))
+                        cand_px = sc * tile_size
+                        cand_py = sr * tile_size
+                        d = math.hypot(cand_px - tank.x, cand_py - tank.y) / float(tile_size)
+                        # 正交阵位在隔墙破障射击时具备天然优势，赋予轻微优先权
+                        if sc != c_target and sr != r_target:
+                            d += 0.35
                         # 若已有友军占据该阵位，增加权重促使坦克选择包抄另一侧
                         for other in allied_tanks:
                             if other.alive and other != tank:
-                                if math.hypot(other.x - sc * tile_size, other.y - sr * tile_size) < tile_size * 0.9:
+                                if math.hypot(other.x - cand_px, other.y - cand_py) < tile_size * 0.9:
                                     d += 50.0
-                        valid_candidates.append((d, sc * tile_size, sr * tile_size))
+                        valid_candidates.append((d, cand_px, cand_py))
 
             if valid_candidates:
                 valid_candidates.sort(key=lambda item: item[0])
@@ -409,14 +589,17 @@ class AttackTargetCommand(BaseCommand):
         if (subcmd_done and dist_to_subdest > self.move_subcmd.tolerance) or self.stuck_attack_frames > 70:
             return True
 
-        # 到达射击阵位后，若仍存在微小轴向未对齐，主动朝目标轴线微调对齐，确保立刻开火
+        # 到达射击阵位后，若视线被砖块阻挡且存在微小轴向未对齐，主动朝目标轴线微调对齐；若视线已畅通则保持瞄准角
         if subcmd_done and dist_to_subdest <= self.move_subcmd.tolerance:
-            if abs(dx) < abs(dy):
-                step_dir = Direction.RIGHT if target_center_x > center_x else Direction.LEFT
-                physics_engine.move_tank(tank, step_dir)
+            if not los_clear:
+                if abs(dx) < abs(dy):
+                    step_dir = Direction.RIGHT if target_center_x > center_x else Direction.LEFT
+                    physics_engine.move_tank(tank, step_dir)
+                else:
+                    step_dir = Direction.DOWN if target_center_y > center_y else Direction.UP
+                    physics_engine.move_tank(tank, step_dir)
             else:
-                step_dir = Direction.DOWN if target_center_y > center_y else Direction.UP
-                physics_engine.move_tank(tank, step_dir)
+                tank.angle = target_angle
 
         return False
 
@@ -426,12 +609,13 @@ class GuardUnitCommand(BaseCommand):
     战术指令：【跟踪并保卫特定己方单位 (Guard / Escort Unit)】
     - 跟随被保卫的己方单位（如核心防御塔或领袖战车），保持在护卫距离内；
     - 当有威胁敌军靠近时，主动开火并拦截威胁者；
-    - 威胁解除后回归被保卫者身旁。
+    - 威胁解除后沿斜向最优路径回归被保卫者身旁。
     """
     def __init__(self, target_to_guard: Tank, guard_dist: float = 65.0):
         self.target_to_guard = target_to_guard
         self.guard_dist = guard_dist
         self.attack_subcmd: Optional[AttackTargetCommand] = None
+        self.move_subcmd: Optional[MoveCommand] = None
 
     def execute(self, tank: Tank, physics_engine, game_map: GameMap) -> bool:
         if not tank.alive or not self.target_to_guard.alive:
@@ -466,24 +650,18 @@ class GuardUnitCommand(BaseCommand):
         else:
             self.attack_subcmd = None
 
-        # 3. 无威胁时，跟随被护卫单位
+        # 3. 无威胁时，沿斜线直接跟随靠拢被护卫单位（带动态避障与 A* 绕障）
         if tank.is_tower or tank.speed <= 0:
             return False
 
         dist_to_guarded = math.hypot(target_cx - center_x, target_cy - center_y)
         if dist_to_guarded > self.guard_dist:
-            # 靠拢被护卫者
-            dx = target_cx - center_x
-            dy = target_cy - center_y
-            if abs(dx) > abs(dy):
-                primary = Direction.RIGHT if dx > 0 else Direction.LEFT
-                secondary = Direction.DOWN if dy > 0 else Direction.UP
-            else:
-                primary = Direction.DOWN if dy > 0 else Direction.UP
-                secondary = Direction.RIGHT if dx > 0 else Direction.LEFT
-
-            if not physics_engine.move_tank(tank, primary):
-                physics_engine.move_tank(tank, secondary)
+            gx, gy = self.target_to_guard.x, self.target_to_guard.y
+            if self.move_subcmd is None or math.hypot(self.move_subcmd.dest_x - gx, self.move_subcmd.dest_y - gy) > 16.0:
+                self.move_subcmd = MoveCommand(gx, gy, tolerance=self.guard_dist * 0.85, auto_clear_path=True)
+            self.move_subcmd.execute(tank, physics_engine, game_map)
+        else:
+            self.move_subcmd = None
 
         return False
 

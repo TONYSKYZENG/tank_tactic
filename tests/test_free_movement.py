@@ -91,6 +91,38 @@ class TestFreeMovementAndRotation(unittest.TestCase):
         # 视线应当被砖墙阻挡
         self.assertFalse(BaseCommand.is_line_of_sight_clear(32, 32, 160, 160, self.game_map))
 
+    def test_direct_diagonal_pathfinding_no_orthogonal_zig_zag(self):
+        """测试寻路与移动直接走斜线到达目标，而不是先横再竖或先竖再横"""
+        from command.pathfinder import GridPathfinder
+
+        tank = Tank(x=32.0, y=32.0, size=32, speed=4.0, camp=Camp.PLAYER)
+        self.physics.add_player_tank(tank)
+
+        pf = GridPathfinder(self.game_map)
+        # 非 45° 任意斜向目标：(256, 160)，即 dx=224, dy=128
+        path, ammo = pf.find_path(32.0, 32.0, 256.0, 160.0, tank=tank, limited_ammo_enabled=True)
+        self.assertEqual(ammo, 0)
+        # 开阔地形应直接拉直为单一终点航点，无任何先横再竖的折点
+        self.assertEqual(path, [(256.0, 160.0)])
+
+        cmd = MoveCommand(dest_x=256.0, dest_y=160.0, tolerance=4.0)
+        prev_x, prev_y = tank.x, tank.y
+        cmd.execute(tank, self.physics, self.game_map)
+
+        # 第一帧即同时在 X 和 Y 方向斜向推进，而非单轴正交移动
+        self.assertGreater(tank.x, prev_x)
+        self.assertGreater(tank.y, prev_y)
+
+        # 全程沿直线到达目标，帧数接近欧氏距离 (hypot(224, 128)/4.0 ≈ 64.5 帧)，远小于曼哈顿折线 (352/4 = 88 帧)
+        frames = 1
+        while frames < 80:
+            if cmd.execute(tank, self.physics, self.game_map):
+                break
+            frames += 1
+
+        self.assertLessEqual(frames, 68)
+        self.assertLessEqual(math.hypot(tank.x - 256.0, tank.y - 160.0), 4.0)
+
 
 if __name__ == "__main__":
     unittest.main()

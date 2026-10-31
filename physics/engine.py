@@ -289,32 +289,10 @@ class PhysicsEngine:
                 factor = getattr(tank, "crush_speed_factor", 0.5)
                 step_speed = max(0.5, step_speed * factor)
 
-        align_threshold = tile_size * 0.45
-
-        # 连续通道中心线对齐微调：若行进方向接近正交轴向，自动吸附避免刮蹭砖块
-        if abs(dx_norm) < 0.15:
-            nearest_col = round(curr_x / tile_size)
-            target_x = nearest_col * tile_size
-            diff_x = abs(curr_x - target_x)
-            if diff_x <= align_threshold:
-                step_x = min(step_speed, diff_x)
-                cand_x = curr_x + (step_x if target_x > curr_x else -step_x) if diff_x > 0.05 else target_x
-                if self.can_move_to(tank, cand_x, curr_y):
-                    curr_x = cand_x
-        elif abs(dy_norm) < 0.15:
-            nearest_row = round(curr_y / tile_size)
-            target_y = nearest_row * tile_size
-            diff_y = abs(curr_y - target_y)
-            if diff_y <= align_threshold:
-                step_y = min(step_speed, diff_y)
-                cand_y = curr_y + (step_y if target_y > curr_y else -step_y) if diff_y > 0.05 else target_y
-                if self.can_move_to(tank, curr_x, cand_y):
-                    curr_y = cand_y
-
         vx = dx_norm * step_speed
         vy = dy_norm * step_speed
 
-        # 1. 优先尝试沿目标向量完整位移
+        # 1. 优先尝试沿目标向量完整自由位移（不强行吸附网格，确保任意角度斜向平滑移动）
         new_x = curr_x + vx
         new_y = curr_y + vy
 
@@ -324,9 +302,44 @@ class PhysicsEngine:
             self._crush_bricks_at(tank, tank.x, tank.y)
             return True
 
-        # 2. 贴墙滑动 (Wall Sliding)：斜向遇障碍时，分解为 X 与 Y 独立滑动
+        # 2. 走廊拐角对齐辅助：仅当直接位移受阻且行进方向接近正交轴向时，微调吸附通道中心线
+        align_threshold = tile_size * 0.45
+        aligned_x, aligned_y = curr_x, curr_y
+        if abs(dx_norm) < 0.25:
+            nearest_col = round(curr_x / tile_size)
+            target_x = nearest_col * tile_size
+            diff_x = abs(curr_x - target_x)
+            if 0.0 < diff_x <= align_threshold:
+                step_x = min(step_speed, diff_x)
+                cand_x = curr_x + (step_x if target_x > curr_x else -step_x) if diff_x > 0.05 else target_x
+                if self.can_move_to(tank, cand_x, curr_y):
+                    aligned_x = cand_x
+        elif abs(dy_norm) < 0.25:
+            nearest_row = round(curr_y / tile_size)
+            target_y = nearest_row * tile_size
+            diff_y = abs(curr_y - target_y)
+            if 0.0 < diff_y <= align_threshold:
+                step_y = min(step_speed, diff_y)
+                cand_y = curr_y + (step_y if target_y > curr_y else -step_y) if diff_y > 0.05 else target_y
+                if self.can_move_to(tank, curr_x, cand_y):
+                    aligned_y = cand_y
+
+        if (aligned_x != curr_x or aligned_y != curr_y) and self.can_move_to(tank, aligned_x + vx, aligned_y + vy):
+            tank.x = aligned_x + vx
+            tank.y = aligned_y + vy
+            self._crush_bricks_at(tank, tank.x, tank.y)
+            return True
+
+        # 3. 贴墙滑动 (Wall Sliding)：斜向遇障碍时，分解为 X 与 Y 独立滑动
         moved_x = False
         moved_y = False
+        base_x, base_y = aligned_x, aligned_y
+        if base_x != curr_x or base_y != curr_y:
+            tank.x = base_x
+            tank.y = base_y
+            self._crush_bricks_at(tank, tank.x, tank.y)
+            return True
+
         if abs(vx) > 1e-4 and self.can_move_to(tank, curr_x + vx, curr_y):
             tank.x = curr_x + vx
             moved_x = True

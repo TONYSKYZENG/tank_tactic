@@ -109,6 +109,51 @@ class TestCollisionDeadlock(unittest.TestCase):
         self.assertIsInstance(new_cmd, AttackTargetCommand)
         self.assertEqual(new_cmd.target_tank, reachable_target)
 
+    def test_dynamic_avoidance_around_stationary_and_moving_tanks(self):
+        """测试斜向行军中遇到驻留友军或阻挡坦克时，平滑绕障直达终点而不回滑卡死"""
+        import math
+        # 主战车从左上 (32, 32) 斜向前往右下 (256, 256)
+        mover = Tank(x=32.0, y=32.0, size=32, speed=4.0, camp=Camp.PLAYER, tank_id="mover")
+        # 在正对角线中途 (128, 128) 放置一辆静止友军坦克作为动态障碍
+        blocker = Tank(x=128.0, y=128.0, size=32, speed=0.0, camp=Camp.PLAYER, tank_id="blocker")
+
+        self.physics.add_player_tank(mover)
+        self.physics.add_player_tank(blocker)
+
+        cmd = MoveCommand(dest_x=256.0, dest_y=256.0, tolerance=6.0)
+        reached = False
+        for _ in range(110):
+            if cmd.execute(mover, self.physics, self.game_map):
+                reached = True
+                break
+            self.physics.update()
+
+        self.assertTrue(reached, "坦克应平滑绕过对角线中途的阻挡单位并抵达终点")
+        self.assertLessEqual(math.hypot(mover.x - 256.0, mover.y - 256.0), 6.0)
+
+    def test_diagonal_head_on_crossing_both_reach_goals(self):
+        """测试两辆坦克沿对角线迎头相向行进时，利用前瞻右侧通行法则双双平滑错车到达各自终点"""
+        import math
+        tank_1 = Tank(x=32.0, y=32.0, size=32, speed=4.0, camp=Camp.PLAYER, tank_id="t1")
+        tank_2 = Tank(x=224.0, y=224.0, size=32, speed=4.0, camp=Camp.PLAYER, tank_id="t2")
+
+        self.physics.add_player_tank(tank_1)
+        self.physics.add_player_tank(tank_2)
+        self.dispatcher.register_tank(tank_1)
+        self.dispatcher.register_tank(tank_2)
+
+        self.dispatcher.tank_commands[tank_1.id] = MoveCommand(dest_x=224.0, dest_y=224.0, tolerance=6.0)
+        self.dispatcher.tank_commands[tank_2.id] = MoveCommand(dest_x=32.0, dest_y=32.0, tolerance=6.0)
+
+        for _ in range(110):
+            self.dispatcher.update(self.physics.player_tanks, None, False, self.physics, self.game_map)
+            self.physics.update()
+            if self.dispatcher.tank_commands[tank_1.id] is None and self.dispatcher.tank_commands[tank_2.id] is None:
+                break
+
+        self.assertLessEqual(math.hypot(tank_1.x - 224.0, tank_1.y - 224.0), 8.0)
+        self.assertLessEqual(math.hypot(tank_2.x - 32.0, tank_2.y - 32.0), 8.0)
+
 
 if __name__ == "__main__":
     unittest.main()

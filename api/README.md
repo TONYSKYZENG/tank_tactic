@@ -424,8 +424,253 @@ Requests a complete telemetry and status report for a specific friendly unit.
     "is_tower": false,
     "tower_type": "general",
     "resupply_radius": 0.0,
-    "auto_clear": false
+    "auto_clear": false,
+    "converter_table": ["recipe_dm_to_alloy", "recipe_build_tank"],
+    "is_converting": false,
+    "converter_status": { "is_converting": false }
   }
+}
+```
+
+---
+
+### 11. `api.find_path`
+
+Plans an optimal A* path from the unit's current position to target coordinates `(x, y)`. Automatically calculates path length, waypoint nodes, and ammo breach costs based on limited/unlimited ammo rules.
+
+#### Request:
+```json
+{
+  "action": "api.find_path",
+  "unit_id": "player_alpha",
+  "x": 480.0,
+  "y": 320.0
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "unit_id": "player_alpha",
+  "start": [224.0, 448.0],
+  "goal": [480.0, 320.0],
+  "reachable": true,
+  "nodes_count": 12,
+  "ammo_cost": 2,
+  "nodes": [[224.0, 448.0], [256.0, 416.0], [480.0, 320.0]]
+}
+```
+
+---
+
+### 12. `api.get_resources`
+
+Queries tactical resource stockpiles (e.g. `dark_matter`, `alloy`) and current real-time harvesting income rates for a given camp.
+
+#### Request:
+```json
+{
+  "action": "api.get_resources",
+  "camp": "player"
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "camp": "player",
+  "resources": {
+    "dark_matter": 120.0,
+    "alloy": 65.0
+  },
+  "rates": {
+    "dark_matter": 2.5,
+    "alloy": 0.0
+  }
+}
+```
+
+---
+
+### 13. `api.list_resource_blocks`
+
+Lists all active natural resource blocks on the map with their tile coordinates, current amount, regeneration speed, harvesting radius, and exclusive occupation radius.
+
+#### Request:
+```json
+{
+  "action": "api.list_resource_blocks",
+  "unit_id": "player_alpha"
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "count": 2,
+  "blocks": [
+    {
+      "col": 8,
+      "row": 12,
+      "x": 288.0,
+      "y": 432.0,
+      "resource_type": "dark_matter",
+      "current_amount": 100.0,
+      "max_amount": 100.0,
+      "regen_rate": 2.0,
+      "harvest_radius": 120.0,
+      "exclusive_radius": 80.0,
+      "in_range": true,
+      "is_exclusive": true
+    }
+  ]
+}
+```
+
+---
+
+### 14. `api.command_harvest` & `api.command_stop_harvest`
+
+Orders units to begin extracting tactical resources from a designated map tile `(col, row)`, or stops harvesting.
+
+#### Request (Start Harvest):
+```json
+{
+  "action": "api.harvest",
+  "unit_ids": ["player_alpha"],
+  "col": 8,
+  "row": 12
+}
+```
+
+#### Request (Stop Harvest):
+```json
+{
+  "action": "api.stop_harvest",
+  "unit_ids": ["player_alpha"]
+}
+```
+
+---
+
+### 15. `api.list_converter`
+
+Enumerates all registered converter recipes loaded into the global registry (`converter/` directory), returning recipe IDs and brief metadata.
+
+#### Request:
+```json
+{
+  "action": "api.list_converter"
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "count": 5,
+  "converter_ids": [
+    "recipe_alloy_to_dm",
+    "recipe_build_tank",
+    "recipe_dm_to_alloy",
+    "recipe_free_energy",
+    "recipe_hyper_fusion"
+  ],
+  "converters": [
+    {
+      "id": "recipe_alloy_to_dm",
+      "name": "converter.recipe.alloy_to_dm",
+      "output_type": "resource",
+      "duration": 5.0
+    },
+    {
+      "id": "recipe_build_tank",
+      "name": "converter.recipe.build_tank",
+      "output_type": "tank",
+      "duration": 5.0
+    },
+    {
+      "id": "recipe_free_energy",
+      "name": "converter.recipe.free_energy",
+      "output_type": "resource",
+      "duration": 3.0
+    }
+  ]
+}
+```
+
+---
+
+### 16. `api.show_converter`
+
+Fetches detailed parameters of a specific converter recipe by its ID. Supports querying zero-input recipes (free resource generation) and tank-production recipes (containing chassis template, visibility, vision size, and ammo).
+
+#### Request:
+```json
+{
+  "action": "api.show_converter",
+  "converter_id": "recipe_build_tank"
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "converter_id": "recipe_build_tank",
+  "converter": {
+    "id": "recipe_build_tank",
+    "name": "converter.recipe.build_tank",
+    "inputs": {
+      "alloy": 15.0
+    },
+    "outputs": "tank",
+    "duration": 5.0,
+    "output_type": "tank",
+    "tank_config": "tank_configs/player_tank.json",
+    "visibility": 0.9,
+    "vision_size": 300.0,
+    "ammo": 25
+  }
+}
+```
+
+---
+
+### 17. `api.convert` & `api.terminate_convert`
+
+Enqueues and starts a conversion or unit production task on an equipped armor unit. While converting, the unit is held stationary and cannot move or fire. When a tank is produced, it automatically receives an ID of `{producer_id}/{sequence}`, is placed on adjacent free terrain, and is registered to the global battle state.
+
+#### Request (Start Conversion / Production):
+```json
+{
+  "action": "api.convert",
+  "unit_id": "player_alpha",
+  "recipe_id": "recipe_build_tank",
+  "count": 2
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "unit_id": "player_alpha",
+  "recipe_id": "recipe_build_tank",
+  "count": 2,
+  "result": "started",
+  "is_converting": true
+}
+```
+
+#### Request (Terminate Conversion):
+```json
+{
+  "action": "api.terminate_convert",
+  "unit_id": "player_alpha"
 }
 ```
 
@@ -441,10 +686,11 @@ python3 tests/cli_client.py
 
 # Or execute a one-shot command
 python3 tests/cli_client.py --cmd "list"
-python3 tests/cli_client.py --cmd "list_enemy"
-python3 tests/cli_client.py --cmd "list_enemy god"
-python3 tests/cli_client.py --cmd "report player_alpha"
-python3 tests/cli_client.py --cmd "move player_alpha 200 300"
+python3 tests/cli_client.py --cmd "resources"
+python3 tests/cli_client.py --cmd "list_converter"
+python3 tests/cli_client.py --cmd "show_converter recipe_build_tank"
+python3 tests/cli_client.py --cmd "convert player_alpha recipe_build_tank 1"
+python3 tests/cli_client.py --cmd "harvest player_alpha 8 12"
 ```
 
 ### CLI Command Summary:
@@ -463,9 +709,17 @@ python3 tests/cli_client.py --cmd "move player_alpha 200 300"
 | `attack <ids> <enemy_id>` | Order batch focus fire |
 | `tactic <ids> <mode>` | Set combat tactic (`aggressive`, `defensive`, etc.) |
 | `guard <ids> <ally_id>` | Assign bodyguard escort orders |
-| `terminate` | Terminate engine process |
 | `fire <ids> [direction]` | Order batch cannon fire |
 | `path <id> <x> <y>` | Plan optimal A* path & query ammo breach cost |
+| `resources [camp]` | Query resource reserves & real-time income rates |
+| `blocks [unit_id]` | Query active resource blocks and harvest ranges |
+| `harvest <ids> <c> <r>` | Order units to harvest resource block at tile `(col, row)` |
+| `stop_harvest [ids]` | Stop resource harvesting |
+| `list_converter` | List all registered converter recipe IDs |
+| `show_converter <id>` | Display detailed parameters of a converter recipe |
+| `convert <id> <r_id> [n]`| Enqueue recipe conversion or tank production |
+| `terminate_convert [id]`| Terminate active conversion and clear queue |
+| `terminate` | Terminate engine process |
 | `raw <json>` | Send custom arbitrary JSON payload |
 
 ---

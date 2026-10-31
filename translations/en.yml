@@ -183,3 +183,5 @@ converter:
     dm_to_alloy: "Dark Matter to Alloy (10 DM -> 5 Alloy)"
     alloy_to_dm: "Alloy to Dark Matter (8 Alloy -> 12 DM)"
     hyper_fusion: "Hyper Fusion (20 DM + 15 Alloy -> 35 DM + 25 Alloy)"
+    free_energy: "Zero-Point Energy Extraction (Free Dark Matter)"
+    build_tank: "Assault Tank Production Line (Construct Tank)"

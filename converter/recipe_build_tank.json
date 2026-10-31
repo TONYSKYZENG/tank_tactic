@@ -1,0 +1,14 @@
+{
+  "id": "recipe_build_tank",
+  "name": "converter.recipe.build_tank",
+  "inputs": {
+    "alloy": 15.0
+  },
+  "outputs": "tank",
+  "output_type": "tank",
+  "tank_config": "tank_configs/player_tank.json",
+  "visibility": 0.9,
+  "vision_size": 300.0,
+  "ammo": 25,
+  "duration": 5.0
+}

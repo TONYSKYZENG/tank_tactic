@@ -515,7 +515,16 @@ class GameCanvasWidget(QWidget):
             for t in all_tanks:
                 if t.alive and t.converter:
                     camp_str = t.camp.value if hasattr(t.camp, "value") else str(t.camp)
-                    t.converter.update(0.016, self.resource_manager, camp=camp_str)
+                    t.converter.update(
+                        0.016,
+                        self.resource_manager,
+                        camp=camp_str,
+                        physics_engine=self.physics_engine,
+                        game_map=self.game_map,
+                        command_dispatcher=self.command_dispatcher,
+                        ai_controller=self.ai_controller,
+                        base_dir=self.base_dir
+                    )
 
             has_manual_input = self._process_micro_tank_input()
             self.command_dispatcher.update(

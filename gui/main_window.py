@@ -310,8 +310,18 @@ class MainWindow(QMainWindow):
             self.lbl_recipe_detail.setText("")
             return
 
-        in_str = ", ".join(f"{v:g} {k}" for k, v in recipe.inputs.items())
-        out_str = ", ".join(f"{v:g} {k}" for k, v in recipe.outputs.items())
+        if recipe.inputs:
+            in_str = ", ".join(f"{v:g} {k}" for k, v in recipe.inputs.items())
+        else:
+            in_str = "无 (Free)"
+
+        if recipe.output_type == "tank":
+            ammo_str = "∞" if recipe.ammo < 0 else str(recipe.ammo)
+            out_str = f"战车 (Tank) [辨识度:{recipe.visibility:.1f}, 视野:{recipe.vision_size:.0f}, 弹药:{ammo_str}]"
+        elif isinstance(recipe.outputs, dict):
+            out_str = ", ".join(f"{v:g} {k}" for k, v in recipe.outputs.items())
+        else:
+            out_str = str(recipe.outputs)
         self.lbl_recipe_detail.setText(f"消耗: {in_str}\n产出: {out_str} ({recipe.duration:.1f}s)")
 
     def _on_start_convert_clicked(self):

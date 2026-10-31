@@ -1,6 +1,7 @@
 import json
 import random
 import logging
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 from command.tactics_mode import TacticMode
 
@@ -115,6 +116,10 @@ class GameAPIController:
             return self.find_path(params)
 
         # 7. 经济系统、配方转换与资源开采
+        elif action in ("list_converter", "list_converters", "list_recipes", "list_converter_id", "list_converter_ids"):
+            return self.list_converter(params)
+        elif action in ("show_converter", "get_converter", "show_recipe", "get_recipe", "converter_detail"):
+            return self.show_converter(params)
         elif action in ("convert", "start_convert"):
             return self.convert(params)
         elif action in ("terminate_convert", "cancel_convert", "clear_convert"):
@@ -910,7 +915,8 @@ class GameAPIController:
         if not res_mgr:
             return {"status": "error", "error": "No resource manager available"}
 
-        ok, reason = tank.converter.enqueue(recipe, count, res_mgr)
+        camp_str = tank.camp.value if hasattr(tank.camp, "value") else str(tank.camp)
+        ok, reason = tank.converter.enqueue(recipe, count, res_mgr, camp=camp_str)
         if not ok:
             return {"status": "error", "error": f"Failed to enqueue conversion: {reason}"}
 
@@ -950,6 +956,78 @@ class GameAPIController:
                 if t.converter:
                     t.converter.terminate()
             return {"status": "ok", "message": "All conversion queues terminated"}
+
+    def list_converter(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        展示全局所有已注册的转换器配方 ID 及概要信息
+        """
+        from converter.loader import RecipeRegistry
+        recipes = RecipeRegistry.get_all()
+        if not recipes:
+            base_dir = getattr(self.game_context, "base_dir", None)
+            if base_dir:
+                recipes = RecipeRegistry.load_recipes(Path(base_dir) / "converter")
+            else:
+                recipes = RecipeRegistry.load_recipes()
+
+        converter_ids = list(recipes.keys())
+        items = []
+        for r in recipes.values():
+            items.append({
+                "id": r.id,
+                "name": r.name,
+                "output_type": r.output_type,
+                "duration": r.duration
+            })
+
+        return {
+            "status": "ok",
+            "converter_ids": converter_ids,
+            "count": len(converter_ids),
+            "converters": items
+        }
+
+    def show_converter(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        读取特定 ID 的转换器配方详细配置
+        :param converter_id / recipe_id / id: 配方唯一 ID (必填)
+        """
+        converter_id = str(params.get("converter_id") or params.get("recipe_id") or params.get("id") or "").strip()
+        if not converter_id:
+            return {"status": "error", "error": "Missing 'converter_id' or 'recipe_id' parameter"}
+
+        from converter.loader import RecipeRegistry
+        recipe = RecipeRegistry.get(converter_id)
+        if not recipe:
+            base_dir = getattr(self.game_context, "base_dir", None)
+            if base_dir:
+                recipes = RecipeRegistry.load_recipes(Path(base_dir) / "converter")
+            else:
+                recipes = RecipeRegistry.load_recipes()
+            recipe = recipes.get(converter_id)
+
+        if not recipe:
+            return {"status": "error", "error": f"Converter recipe '{converter_id}' not found"}
+
+        converter_info = {
+            "id": recipe.id,
+            "name": recipe.name,
+            "inputs": dict(recipe.inputs) if isinstance(recipe.inputs, dict) else {},
+            "outputs": dict(recipe.outputs) if isinstance(recipe.outputs, dict) else recipe.outputs,
+            "duration": float(recipe.duration),
+            "output_type": str(recipe.output_type),
+            "tank_config": recipe.tank_config,
+            "visibility": float(recipe.visibility),
+            "vision_size": float(recipe.vision_size),
+            "ammo": int(recipe.ammo)
+        }
+
+        return {
+            "status": "ok",
+            "converter_id": recipe.id,
+            "converter": converter_info,
+            "recipe": converter_info
+        }
 
     def get_resources(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """查询当前拥有的所有各类资源储备及每秒产出速率（支持按阵营查询）"""

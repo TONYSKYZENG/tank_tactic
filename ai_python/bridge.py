@@ -185,6 +185,17 @@ class TankScriptAPI:
             params["unit_id"] = unit_id
         return self._call("terminate_convert", **params)
 
+    def list_converter(self) -> Dict[str, Any]:
+        """展示全局所有已注册的转换器配方 ID 及概要信息"""
+        return self._call("list_converter")
+
+    def show_converter(self, converter_id: str) -> Dict[str, Any]:
+        """
+        读取特定 ID 的转换器配方详细配置
+        :param converter_id: 配方 ID (如 'recipe_build_tank')
+        """
+        return self._call("show_converter", converter_id=converter_id)
+
     def get_resources(self) -> Dict[str, Any]:
         """查询当前拥有的所有各类资源储备及每秒产出速率"""
         return self._call("get_resources")

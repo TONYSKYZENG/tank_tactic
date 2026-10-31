@@ -183,3 +183,5 @@ converter:
     dm_to_alloy: "暗物质合成合金 (10 DM -> 5 Alloy)"
     alloy_to_dm: "合金聚变暗物质 (8 Alloy -> 12 DM)"
     hyper_fusion: "超聚变反应 (20 DM + 15 Alloy -> 35 DM + 25 Alloy)"
+    free_energy: "真空零点能萃取 (凭空产出暗物质)"
+    build_tank: "突击战车建造流水线 (消耗合金建造战车)"

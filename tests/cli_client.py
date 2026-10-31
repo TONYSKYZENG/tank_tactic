@@ -81,6 +81,16 @@ class TanksConsoleClient:
   attack <ids> <target_enemy_id> - Focus fire attack on target enemy
   tactic <ids> <mode>            - Set tactic (aggressive | defensive | manual | guard)
   guard <ids> <friendly_target>  - Escort & guard a friendly unit/tower
+  fire <ids> [direction]         - Order unit(s) to fire cannon
+  path <id> <x> <y>              - Plan optimal A* path & query ammo breach cost
+  resources / res                - Query current resource stockpiles & income rates
+  harvest <ids> <col> <row>      - Order units to harvest resource block at tile (col, row)
+  stop_harvest [ids]             - Stop resource harvesting
+  blocks / resource_blocks       - List active resource blocks on map
+  list_converter / converters    - List all registered converter recipe IDs
+  show_converter <recipe_id>     - Display detailed parameters of a converter recipe
+  convert <id> <recipe_id> [cnt] - Enqueue recipe conversion/production task
+  terminate_convert [unit_id]    - Terminate active conversion and clear queue
   terminate                      - Terminate all engines and shutdown
   ping                           - Ping server
   raw <json>                     - Send arbitrary raw JSON payload
@@ -90,6 +100,11 @@ class TanksConsoleClient:
 Examples:
   tanks> list
   tanks> report player_alpha
+  tanks> resources
+  tanks> list_converter
+  tanks> show_converter recipe_build_tank
+  tanks> convert player_alpha recipe_build_tank 2
+  tanks> harvest player_alpha 2 3
   tanks> move player_alpha,player_bravo 200 300
   tanks> tactic player_alpha defensive
   tanks> guard player_alpha core_supply_base
@@ -193,6 +208,46 @@ Examples:
                 print("❌ Usage: path <unit_id> <x> <y>")
                 return True
             payload = {"action": "api.find_path", "unit_id": args[0], "x": float(args[1]), "y": float(args[2])}
+        elif cmd in ("resources", "res", "get_resources", "api.get_resources"):
+            camp = args[0] if len(args) > 0 else "player"
+            payload = {"action": "api.get_resources", "camp": camp}
+        elif cmd in ("blocks", "resource_blocks", "list_resource_blocks", "api.list_resource_blocks"):
+            unit_id = args[0] if len(args) > 0 else None
+            payload = {"action": "api.list_resource_blocks"}
+            if unit_id:
+                payload["unit_id"] = unit_id
+        elif cmd in ("harvest", "command_harvest", "api.harvest"):
+            if len(args) < 3:
+                print("❌ Usage: harvest <unit_ids> <col> <row>")
+                return True
+            try:
+                col = int(args[1])
+                row = int(args[2])
+            except ValueError:
+                print("❌ col and row must be integer tile coordinates")
+                return True
+            payload = {"action": "api.harvest", "unit_ids": args[0], "col": col, "row": row}
+        elif cmd in ("stop_harvest", "command_stop_harvest", "cancel_harvest", "api.stop_harvest"):
+            unit_ids = args[0] if len(args) > 0 else "*"
+            payload = {"action": "api.stop_harvest", "unit_ids": unit_ids}
+        elif cmd in ("list_converter", "list_converters", "converters", "recipes", "list_recipes", "api.list_converter"):
+            payload = {"action": "api.list_converter"}
+        elif cmd in ("show_converter", "show_recipe", "recipe", "converter", "api.show_converter"):
+            if not args:
+                print("❌ Usage: show_converter <recipe_id>")
+                return True
+            payload = {"action": "api.show_converter", "converter_id": args[0]}
+        elif cmd in ("convert", "start_convert", "api.convert"):
+            if len(args) < 2:
+                print("❌ Usage: convert <unit_id> <recipe_id> [count]")
+                return True
+            count = int(args[2]) if len(args) > 2 else 1
+            payload = {"action": "api.convert", "unit_id": args[0], "recipe_id": args[1], "count": count}
+        elif cmd in ("terminate_convert", "cancel_convert", "clear_convert", "api.terminate_convert"):
+            unit_id = args[0] if len(args) > 0 else None
+            payload = {"action": "api.terminate_convert"}
+            if unit_id:
+                payload["unit_id"] = unit_id
         elif cmd == "raw":
             raw_str = " ".join(args)
             try:

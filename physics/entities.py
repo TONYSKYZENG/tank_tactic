@@ -212,7 +212,7 @@ class Tank:
         self.converter_table = list(converter_table or [])
         if self.converter_table:
             from converter.models import UnitConverter
-            self.converter = UnitConverter(self.converter_table)
+            self.converter = UnitConverter(self.converter_table, owner=self)
         else:
             self.converter = None
 
@@ -233,6 +233,11 @@ class Tank:
         self.is_harvesting = False
         self.harvest_target = None
         self.harvest_state = "idle"
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "converter" and value is not None and getattr(value, "owner", None) is None:
+            value.owner = self
+        super().__setattr__(name, value)
 
     @property
     def is_converting(self) -> bool:

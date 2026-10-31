@@ -23,12 +23,22 @@ class RecipeRegistry:
                 with open(json_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 r_id = data.get("id", json_path.stem)
+                outputs = data.get("outputs", {})
+                output_type = data.get("output_type", "resource")
+                if outputs == "tank" or (isinstance(outputs, dict) and "tank" in outputs):
+                    output_type = "tank"
+
                 recipe = ConverterRecipe(
                     id=r_id,
                     name=data.get("name", r_id),
                     inputs=data.get("inputs", {}),
-                    outputs=data.get("outputs", {}),
-                    duration=float(data.get("duration", 4.0))
+                    outputs=outputs,
+                    duration=float(data.get("duration", 4.0)),
+                    output_type=output_type,
+                    tank_config=data.get("tank_config", None),
+                    visibility=float(data.get("visibility", 1.0)),
+                    vision_size=float(data.get("vision_size", 280.0)),
+                    ammo=int(data.get("ammo", -1))
                 )
                 cls._recipes[r_id] = recipe
             except Exception as e:

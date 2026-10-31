@@ -456,5 +456,92 @@ class TestGameAPI(unittest.TestCase):
 
         runner.stop()
 
+    def test_list_and_show_converter_api(self):
+        """测试 api.list_converter 与 api.show_converter"""
+        # 1. list_converter
+        req = {"action": "api.list_converter"}
+        resp = json.loads(self.controller.handle_request(json.dumps(req)))
+        self.assertEqual(resp["status"], "ok")
+        self.assertIn("converter_ids", resp)
+        self.assertIn("recipe_build_tank", resp["converter_ids"])
+        self.assertIn("recipe_free_energy", resp["converter_ids"])
+        self.assertGreaterEqual(resp["count"], 2)
+
+        # 2. show_converter - 正常查询战车生产配方
+        req_show = {"action": "api.show_converter", "converter_id": "recipe_build_tank"}
+        resp_show = json.loads(self.controller.handle_request(json.dumps(req_show)))
+        self.assertEqual(resp_show["status"], "ok")
+        conv = resp_show["converter"]
+        self.assertEqual(conv["id"], "recipe_build_tank")
+        self.assertEqual(conv["output_type"], "tank")
+        self.assertEqual(conv["visibility"], 0.9)
+        self.assertEqual(conv["vision_size"], 300.0)
+        self.assertEqual(conv["ammo"], 25)
+        self.assertEqual(conv["inputs"], {"alloy": 15.0})
+
+        # 3. show_converter - 零输入资源产出配方
+        req_free = {"action": "api.show_converter", "recipe_id": "recipe_free_energy"}
+        resp_free = json.loads(self.controller.handle_request(json.dumps(req_free)))
+        self.assertEqual(resp_free["status"], "ok")
+        self.assertEqual(resp_free["converter"]["inputs"], {})
+        self.assertEqual(resp_free["converter"]["output_type"], "resource")
+
+        # 4. show_converter - 缺失参数
+        req_err1 = {"action": "api.show_converter"}
+        resp_err1 = json.loads(self.controller.handle_request(json.dumps(req_err1)))
+        self.assertEqual(resp_err1["status"], "error")
+
+        # 5. show_converter - 配方不存在
+        req_err2 = {"action": "api.show_converter", "converter_id": "non_existent_recipe"}
+        resp_err2 = json.loads(self.controller.handle_request(json.dumps(req_err2)))
+        self.assertEqual(resp_err2["status"], "error")
+
+    def test_cli_client_extended_commands(self):
+        """测试 tests/cli_client.py 扩展命令解析与路由"""
+        from tests.cli_client import TanksConsoleClient
+        client = TanksConsoleClient()
+        sent_payloads = []
+        client.send_request = lambda payload: sent_payloads.append(payload) or {"status": "ok"}
+        client._print_response = lambda resp: None
+
+        # list_converter
+        client.execute_command_line("list_converter")
+        self.assertEqual(sent_payloads[-1]["action"], "api.list_converter")
+
+        # show_converter
+        client.execute_command_line("show_converter recipe_build_tank")
+        self.assertEqual(sent_payloads[-1]["action"], "api.show_converter")
+        self.assertEqual(sent_payloads[-1]["converter_id"], "recipe_build_tank")
+
+        # resources
+        client.execute_command_line("resources")
+        self.assertEqual(sent_payloads[-1]["action"], "api.get_resources")
+
+        # blocks
+        client.execute_command_line("blocks")
+        self.assertEqual(sent_payloads[-1]["action"], "api.list_resource_blocks")
+
+        # harvest
+        client.execute_command_line("harvest player_alpha 5 6")
+        self.assertEqual(sent_payloads[-1]["action"], "api.harvest")
+        self.assertEqual(sent_payloads[-1]["col"], 5)
+        self.assertEqual(sent_payloads[-1]["row"], 6)
+
+        # stop_harvest
+        client.execute_command_line("stop_harvest player_alpha")
+        self.assertEqual(sent_payloads[-1]["action"], "api.stop_harvest")
+
+        # convert
+        client.execute_command_line("convert player_alpha recipe_build_tank 3")
+        self.assertEqual(sent_payloads[-1]["action"], "api.convert")
+        self.assertEqual(sent_payloads[-1]["unit_id"], "player_alpha")
+        self.assertEqual(sent_payloads[-1]["recipe_id"], "recipe_build_tank")
+        self.assertEqual(sent_payloads[-1]["count"], 3)
+
+        # terminate_convert
+        client.execute_command_line("terminate_convert player_alpha")
+        self.assertEqual(sent_payloads[-1]["action"], "api.terminate_convert")
+        self.assertEqual(sent_payloads[-1]["unit_id"], "player_alpha")
+
 if __name__ == "__main__":
     unittest.main()

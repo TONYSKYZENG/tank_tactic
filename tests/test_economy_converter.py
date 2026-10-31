@@ -357,6 +357,175 @@ class TestEconomyAndConverter(unittest.TestCase):
         # 总量保持在 105.0 不再无故增加
         self.assertEqual(self.res_mgr.get_amount("dark_matter", camp="player"), 105.0)
 
+    def test_free_recipe_without_inputs(self):
+        """测试要求 1：接受没有 input、直接凭空产生资源的配方"""
+        free_recipe = ConverterRecipe(
+            id="recipe_vacuum_energy",
+            name="converter.recipe.vacuum_energy",
+            inputs={},
+            outputs={"dark_matter": 7.5},
+            duration=2.0
+        )
+        self.res_mgr.stockpiles["player"]["dark_matter"] = 0.0
+        tank = Tank(x=0, y=0, size=32, camp=Camp.PLAYER, tank_id="harvester_alpha",
+                    converter_table=["recipe_vacuum_energy"])
+        self.physics.add_player_tank(tank)
+
+        # 即使没有任何暗物质输入，也允许启动 2 批次
+        ok, reason = tank.converter.enqueue(free_recipe, count=2, resource_manager=self.res_mgr)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "started")
+        self.assertTrue(tank.is_converting)
+
+        # 推进 2.0s，第 1 批完成
+        tank.converter.update(2.0, self.res_mgr)
+        self.assertEqual(self.res_mgr.get_amount("dark_matter"), 7.5)
+        self.assertTrue(tank.is_converting)
+
+        # 推进 2.0s，第 2 批完成
+        tank.converter.update(2.0, self.res_mgr)
+        self.assertEqual(self.res_mgr.get_amount("dark_matter"), 15.0)
+        self.assertFalse(tank.is_converting)
+
+    def test_tank_production_auto_id_and_global_spawn(self):
+        """测试要求 2, 3, 4, 5：output 为 tank，携带可见性、视野、初始弹药，ID 为 生产者/序号，在周围空地生成并加入全局"""
+        tank_recipe = ConverterRecipe(
+            id="recipe_produce_fighter",
+            name="converter.recipe.produce_fighter",
+            inputs={"alloy": 10.0},
+            outputs="tank",
+            duration=3.0,
+            output_type="tank",
+            visibility=0.75,
+            vision_size=310.0,
+            ammo=25
+        )
+        self.res_mgr.stockpiles["player"]["alloy"] = 30.0
+
+        builder = Tank(x=64, y=64, size=32, camp=Camp.PLAYER, tank_id="builder_prime",
+                      converter_table=["recipe_produce_fighter"])
+        self.physics.add_player_tank(builder)
+
+        from command.dispatcher import CommandDispatcher
+        dispatcher = CommandDispatcher()
+        dispatcher.register_tank(builder)
+
+        self.assertEqual(len(self.physics.player_tanks), 1)
+
+        # 启动 2 批次建造
+        ok, reason = builder.converter.enqueue(tank_recipe, count=2, resource_manager=self.res_mgr)
+        self.assertTrue(ok)
+        self.assertEqual(self.res_mgr.get_amount("alloy"), 20.0)
+
+        # 推进 3.0s 生产出第 1 辆战车
+        spawned1 = builder.converter.update(
+            3.0, self.res_mgr, camp="player",
+            physics_engine=self.physics, game_map=self.game_map,
+            command_dispatcher=dispatcher
+        )
+        self.assertEqual(len(spawned1), 1)
+        tank1 = spawned1[0]
+
+        # 校验 4: 自动生成 ID 为 生产者/序号
+        self.assertEqual(tank1.id, "builder_prime/1")
+
+        # 校验 3: 可见性、视野、初始弹药
+        self.assertAlmostEqual(tank1.visibility, 0.75)
+        self.assertAlmostEqual(tank1.vision_size, 310.0)
+        self.assertEqual(tank1.ammo, 25)
+
+        # 校验 5: 增加到全局 (physics_engine 及 command_dispatcher)
+        self.assertIn(tank1, self.physics.player_tanks)
+        self.assertIn(tank1.id, dispatcher.tank_tactics)
+
+        # 校验 5: 自动在生产者周围空地生成（不与生产者重合碰撞）
+        self.assertFalse(tank1.rect.collides_with(builder.rect))
+        self.assertTrue(self.physics.can_move_to(tank1, tank1.x, tank1.y))
+
+        # 推进第 2 批次完成
+        spawned2 = builder.converter.update(
+            3.0, self.res_mgr, camp="player",
+            physics_engine=self.physics, game_map=self.game_map,
+            command_dispatcher=dispatcher
+        )
+        self.assertEqual(len(spawned2), 1)
+        tank2 = spawned2[0]
+        self.assertEqual(tank2.id, "builder_prime/2")
+        self.assertIn(tank2, self.physics.player_tanks)
+        self.assertFalse(tank2.rect.collides_with(builder.rect))
+        self.assertFalse(tank2.rect.collides_with(tank1.rect))
+        self.assertEqual(len(self.physics.player_tanks), 3)
+
+    def test_enemy_tank_production_auto_id_and_ai(self):
+        """测试敌军生产战车：自动分配 enemy 专属 ID，并注册至 AI 控制器与全局"""
+        enemy_recipe = ConverterRecipe(
+            id="recipe_enemy_spawn",
+            name="converter.recipe.enemy_spawn",
+            inputs={},
+            outputs="tank",
+            duration=1.0,
+            output_type="tank",
+            visibility=0.9,
+            vision_size=200.0,
+            ammo=10
+        )
+        enemy_factory = Tank(x=128, y=128, size=32, camp=Camp.ENEMY, tank_id="e_factory",
+                             converter_table=["recipe_enemy_spawn"])
+        self.physics.add_enemy_tank(enemy_factory)
+
+        from ai.controller import EnemyAIController
+        ai_ctrl = EnemyAIController(self.physics, self.game_map)
+
+        ok, _ = enemy_factory.converter.enqueue(enemy_recipe, count=1, resource_manager=self.res_mgr, camp="enemy")
+        self.assertTrue(ok)
+
+        spawned = enemy_factory.converter.update(
+            1.0, self.res_mgr, camp="enemy",
+            physics_engine=self.physics, game_map=self.game_map,
+            ai_controller=ai_ctrl
+        )
+        self.assertEqual(len(spawned), 1)
+        new_enemy = spawned[0]
+        self.assertEqual(new_enemy.id, "e_factory/1")
+        self.assertEqual(new_enemy.camp, Camp.ENEMY)
+        self.assertIn(new_enemy, self.physics.enemy_tanks)
+        self.assertIn(new_enemy.id, ai_ctrl.agents)
+        self.assertFalse(new_enemy.rect.collides_with(enemy_factory.rect))
+
+    def test_recipe_registry_and_api_integration(self):
+        """测试从 JSON 载入零输入配方与战车制造配方，并通过 API 下达建造"""
+        from converter.loader import RecipeRegistry
+        from api.controller import GameAPIController
+
+        recipes = RecipeRegistry.load_recipes()
+        self.assertIn("recipe_free_energy", recipes)
+        self.assertIn("recipe_build_tank", recipes)
+
+        r_free = recipes["recipe_free_energy"]
+        self.assertEqual(r_free.inputs, {})
+        self.assertEqual(r_free.output_type, "resource")
+
+        r_tank = recipes["recipe_build_tank"]
+        self.assertEqual(r_tank.output_type, "tank")
+        self.assertEqual(r_tank.visibility, 0.9)
+        self.assertEqual(r_tank.vision_size, 300.0)
+        self.assertEqual(r_tank.ammo, 25)
+
+        # 模拟通过 API 控制器触发转换
+        factory = Tank(x=32, y=32, size=32, camp=Camp.PLAYER, tank_id="api_factory",
+                       converter_table=["recipe_free_energy", "recipe_build_tank"])
+        self.physics.add_player_tank(factory)
+
+        class MockGameCtx:
+            def __init__(self, physics, res_mgr):
+                self.physics_engine = physics
+                self.resource_manager = res_mgr
+
+        api = GameAPIController(MockGameCtx(self.physics, self.res_mgr))
+        resp = api.convert({"unit_id": "api_factory", "recipe_id": "recipe_free_energy", "count": 1})
+        self.assertEqual(resp["status"], "ok")
+        self.assertTrue(factory.is_converting)
+
 
 if __name__ == "__main__":
     unittest.main()

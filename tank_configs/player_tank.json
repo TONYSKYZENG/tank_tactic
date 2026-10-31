@@ -12,6 +12,8 @@
   "converter_table": [
     "recipe_dm_to_alloy",
     "recipe_alloy_to_dm",
-    "recipe_hyper_fusion"
+    "recipe_hyper_fusion",
+    "recipe_free_energy",
+    "recipe_build_tank"
   ]
 }

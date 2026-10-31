@@ -1,0 +1,9 @@
+{
+  "id": "recipe_free_energy",
+  "name": "converter.recipe.free_energy",
+  "inputs": {},
+  "outputs": {
+    "dark_matter": 2.0
+  },
+  "duration": 3.0
+}

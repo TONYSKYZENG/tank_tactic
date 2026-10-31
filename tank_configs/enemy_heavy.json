@@ -1,0 +1,12 @@
+{
+  "name": "Enemy Heavy Tank",
+  "speed": 1.6,
+  "size": 36,
+  "color": "#27AE60",
+  "track_color": "#1E8449",
+  "bullet_speed": 5.5,
+  "bullet_size": 14,
+  "bullet_color": "#2ECC71",
+  "fire_cooldown": 35,
+  "health": 2
+}

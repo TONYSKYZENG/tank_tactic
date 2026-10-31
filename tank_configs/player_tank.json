@@ -1,0 +1,12 @@
+{
+  "name": "Classic Tank",
+  "speed": 3.0,
+  "size": 36,
+  "color": "#E69C24",
+  "track_color": "#4A6B2F",
+  "bullet_speed": 6.0,
+  "bullet_size": 12,
+  "bullet_color": "#FFFFFF",
+  "fire_cooldown": 15,
+  "health": 3
+}

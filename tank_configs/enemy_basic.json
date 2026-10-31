@@ -1,0 +1,12 @@
+{
+  "name": "Enemy Basic Tank",
+  "speed": 2.2,
+  "size": 36,
+  "color": "#CCCCCC",
+  "track_color": "#777777",
+  "bullet_speed": 5.0,
+  "bullet_size": 12,
+  "bullet_color": "#EEEEEE",
+  "fire_cooldown": 40,
+  "health": 1
+}

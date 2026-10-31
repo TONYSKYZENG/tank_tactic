@@ -1,0 +1,12 @@
+{
+  "name": "Enemy Fast Tank",
+  "speed": 3.8,
+  "size": 36,
+  "color": "#E74C3C",
+  "track_color": "#962D22",
+  "bullet_speed": 6.5,
+  "bullet_size": 12,
+  "bullet_color": "#FF7675",
+  "fire_cooldown": 30,
+  "health": 1
+}

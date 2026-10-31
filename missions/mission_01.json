@@ -1,0 +1,40 @@
+{
+  "name": "Mission 1: Defense of Eagle Base",
+  "map_file": "maps/level_01.json",
+  "player": {
+    "config_file": "tank_configs/player_tank.json",
+    "spawn": {
+      "x": 6,
+      "y": 14
+    }
+  },
+  "enemies": [
+    {
+      "id": "e_patrol_1",
+      "config_file": "tank_configs/enemy_basic.json",
+      "spawn": {
+        "x": 0,
+        "y": 0
+      },
+      "tactic": "patrol"
+    },
+    {
+      "id": "e_fast_1",
+      "config_file": "tank_configs/enemy_fast.json",
+      "spawn": {
+        "x": 9,
+        "y": 0
+      },
+      "tactic": "charge_base"
+    },
+    {
+      "id": "e_hunter_1",
+      "config_file": "tank_configs/enemy_heavy.json",
+      "spawn": {
+        "x": 19,
+        "y": 0
+      },
+      "tactic": "hunter"
+    }
+  ]
+}

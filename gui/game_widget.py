@@ -6,6 +6,7 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPointF
 
 from map_loader.models import GameMap, TileType
 from mission_loader.models import Mission
+from translations import t
 from tank_configs.config_loader import TankConfig
 from physics.entities import Tank, Direction, Camp, Rect
 from physics.engine import PhysicsEngine
@@ -554,20 +555,21 @@ class GameCanvasWidget(QWidget):
             )
 
         # 9. 胜负与暂停提示
+        restart_str = t("game.restart_hint")
         if self.game_over:
             painter.fillRect(self.rect(), QColor(0, 0, 0, 160))
             painter.setPen(QPen(QColor("#E74C3C")))
             painter.setFont(QFont("Courier New", 20, QFont.Bold))
-            painter.drawText(self.rect(), Qt.AlignCenter, f"GAME OVER\n[{self.defeat_condition.get_description()}]\n(按 R 键重开)")
+            painter.drawText(self.rect(), Qt.AlignCenter, f"GAME OVER\n[{self.defeat_condition.get_description()}]\n{restart_str}")
         elif self.game_victory:
             painter.fillRect(self.rect(), QColor(0, 0, 0, 160))
             painter.setPen(QPen(QColor("#2ECC71")))
             painter.setFont(QFont("Courier New", 20, QFont.Bold))
-            painter.drawText(self.rect(), Qt.AlignCenter, f"VICTORY!\n[{self.victory_condition.get_description()}]\n(按 R 键重开)")
+            painter.drawText(self.rect(), Qt.AlignCenter, f"VICTORY!\n[{self.victory_condition.get_description()}]\n{restart_str}")
         elif self.is_paused:
             painter.fillRect(self.rect(), QColor(0, 0, 0, 110))
             painter.setPen(QPen(QColor("#F1C40F")))
             painter.setFont(QFont("Courier New", 22, QFont.Bold))
-            painter.drawText(self.rect(), Qt.AlignCenter, "PAUSED\n(全部单位与高阶 AI 已冻结\n按 P 键或 API 恢复)")
+            painter.drawText(self.rect(), Qt.AlignCenter, t("game.paused"))
 
         painter.end()

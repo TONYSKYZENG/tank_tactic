@@ -12,6 +12,7 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from map_loader.models import GameMap
 from mission_loader.models import Mission, PlayerMissionInfo, EnemyMissionInfo, SpawnPoint
 from tank_configs.config_loader import TankConfig
+from translations import i18n, t
 from .canvas import EditorCanvas, EditorMode
 
 class MissionEditorWidget(QWidget):
@@ -41,6 +42,7 @@ class MissionEditorWidget(QWidget):
         self._available_configs = self._scan_tank_configs()
         self._available_scripts = self._scan_ai_scripts()
         self._init_ui()
+        self.retranslate_ui()
 
     def set_map(self, game_map: GameMap):
         self.canvas.set_map(game_map)
@@ -81,10 +83,10 @@ class MissionEditorWidget(QWidget):
         left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setSpacing(10)
 
-        title_label = QLabel("🛡 任务单位编队管理")
-        title_label.setFont(QFont("Palatino", 13, QFont.Bold))
-        title_label.setStyleSheet("color: #E6C66E; border: none;")
-        left_layout.addWidget(title_label)
+        self.title_label = QLabel("🛡 任务单位编队管理")
+        self.title_label.setFont(QFont("Palatino", 13, QFont.Bold))
+        self.title_label.setStyleSheet("color: #E6C66E; border: none;")
+        left_layout.addWidget(self.title_label)
 
         # 1. 单位快捷放置按钮
         btn_layout = QHBoxLayout()
@@ -117,12 +119,13 @@ class MissionEditorWidget(QWidget):
         left_layout.addLayout(list_btn_layout)
 
         # 4. 全局任务环境设置
-        global_group = QGroupBox("★ 任务环境规则")
-        global_layout = QVBoxLayout(global_group)
+        self.global_group = QGroupBox("★ 任务环境规则")
+        global_layout = QVBoxLayout(self.global_group)
 
         # 任务名
         m_name_layout = QHBoxLayout()
-        m_name_layout.addWidget(QLabel("任务名:"))
+        self.lbl_m_name_tag = QLabel("任务名:")
+        m_name_layout.addWidget(self.lbl_m_name_tag)
         self.edit_mission_name = QLineEdit("Custom Mission")
         self.edit_mission_name.textChanged.connect(self._on_mission_meta_changed)
         m_name_layout.addWidget(self.edit_mission_name)
@@ -130,7 +133,8 @@ class MissionEditorWidget(QWidget):
 
         # 关联地图路径
         m_map_layout = QHBoxLayout()
-        m_map_layout.addWidget(QLabel("地图文件:"))
+        self.lbl_m_map_tag = QLabel("地图文件:")
+        m_map_layout.addWidget(self.lbl_m_map_tag)
         self.edit_map_file = QLineEdit("maps/level_01.json")
         self.edit_map_file.textChanged.connect(self._on_mission_meta_changed)
         m_map_layout.addWidget(self.edit_map_file)
@@ -147,12 +151,12 @@ class MissionEditorWidget(QWidget):
         self.chk_ammo.toggled.connect(self._on_mission_meta_changed)
         global_layout.addWidget(self.chk_ammo)
 
-        btn_new_mission = QPushButton("⚔ 新建全新任务")
-        btn_new_mission.setStyleSheet("background-color: #2E4053; border: 1px solid #5D6D7E; color: #EAECEE; margin-top: 6px;")
-        btn_new_mission.clicked.connect(self._on_new_mission_clicked)
-        global_layout.addWidget(btn_new_mission)
+        self.btn_new_mission = QPushButton("⚔ 新建全新任务")
+        self.btn_new_mission.setStyleSheet("background-color: #2E4053; border: 1px solid #5D6D7E; color: #EAECEE; margin-top: 6px;")
+        self.btn_new_mission.clicked.connect(self._on_new_mission_clicked)
+        global_layout.addWidget(self.btn_new_mission)
 
-        left_layout.addWidget(global_group)
+        left_layout.addWidget(self.global_group)
         main_layout.addWidget(left_panel)
 
         # ===== 中间地图画布视口 =====
@@ -171,10 +175,10 @@ class MissionEditorWidget(QWidget):
         right_layout.setContentsMargins(6, 6, 6, 6)
         right_layout.setSpacing(6)
 
-        prop_header = QLabel("⚙ 单位属性检视面板")
-        prop_header.setFont(QFont("Palatino", 13, QFont.Bold))
-        prop_header.setStyleSheet("color: #F1C40F; border: none; padding-left: 6px;")
-        right_layout.addWidget(prop_header)
+        self.prop_header = QLabel("⚙ 单位属性检视面板")
+        self.prop_header.setFont(QFont("Palatino", 13, QFont.Bold))
+        self.prop_header.setStyleSheet("color: #F1C40F; border: none; padding-left: 6px;")
+        right_layout.addWidget(self.prop_header)
 
         # ★★★ 关键要求：属性设置区域上下滚动 ★★★
         self.prop_scroll_area = QScrollArea()
@@ -187,46 +191,51 @@ class MissionEditorWidget(QWidget):
         self.prop_layout.setSpacing(12)
 
         # 1. 基础属性
-        basic_group = QGroupBox("1. 身份与阵营")
-        basic_layout = QVBoxLayout(basic_group)
+        self.basic_group = QGroupBox("1. 身份与阵营")
+        basic_layout = QVBoxLayout(self.basic_group)
 
         id_layout = QHBoxLayout()
-        id_layout.addWidget(QLabel("唯一 ID:"))
+        self.lbl_id_tag = QLabel("唯一 ID:")
+        id_layout.addWidget(self.lbl_id_tag)
         self.edit_id = QLineEdit()
         self.edit_id.textChanged.connect(self._on_prop_changed)
         id_layout.addWidget(self.edit_id)
         basic_layout.addLayout(id_layout)
 
         camp_layout = QHBoxLayout()
-        camp_layout.addWidget(QLabel("所属阵营:"))
+        self.lbl_camp_tag = QLabel("所属阵营:")
+        camp_layout.addWidget(self.lbl_camp_tag)
         self.combo_camp = QComboBox()
-        self.combo_camp.addItems(["我方编组 (PLAYER)", "敌方军团 (ENEMY)"])
+        self.combo_camp.addItems(["我方 (Player)", "敌方 (Enemy)"])
         self.combo_camp.currentIndexChanged.connect(self._on_camp_changed)
         camp_layout.addWidget(self.combo_camp)
         basic_layout.addLayout(camp_layout)
 
         cfg_layout = QHBoxLayout()
-        cfg_layout.addWidget(QLabel("单位模板:"))
+        self.lbl_cfg_tag = QLabel("单位模板:")
+        cfg_layout.addWidget(self.lbl_cfg_tag)
         self.combo_config = QComboBox()
         self.combo_config.addItems(self._available_configs)
         self.combo_config.currentIndexChanged.connect(self._on_config_template_changed)
         cfg_layout.addWidget(self.combo_config)
         basic_layout.addLayout(cfg_layout)
 
-        self.prop_layout.addWidget(basic_group)
+        self.prop_layout.addWidget(self.basic_group)
 
         # 2. 出生坐标
-        pos_group = QGroupBox("2. 出生地图坐标")
-        pos_layout = QVBoxLayout(pos_group)
+        self.pos_group = QGroupBox("2. 出生地图坐标")
+        pos_layout = QVBoxLayout(self.pos_group)
 
         coord_layout = QHBoxLayout()
-        coord_layout.addWidget(QLabel("列号 (Col X):"))
+        self.lbl_col_tag = QLabel("列号 (Col X):")
+        coord_layout.addWidget(self.lbl_col_tag)
         self.spin_spawn_x = QSpinBox()
         self.spin_spawn_x.setRange(0, 100)
         self.spin_spawn_x.valueChanged.connect(self._on_prop_changed)
         coord_layout.addWidget(self.spin_spawn_x)
 
-        coord_layout.addWidget(QLabel("行号 (Row Y):"))
+        self.lbl_row_tag = QLabel("行号 (Row Y):")
+        coord_layout.addWidget(self.lbl_row_tag)
         self.spin_spawn_y = QSpinBox()
         self.spin_spawn_y.setRange(0, 100)
         self.spin_spawn_y.valueChanged.connect(self._on_prop_changed)
@@ -238,14 +247,15 @@ class MissionEditorWidget(QWidget):
         self.btn_pick_spawn.clicked.connect(self._on_pick_spawn_clicked)
         pos_layout.addWidget(self.btn_pick_spawn)
 
-        self.prop_layout.addWidget(pos_group)
+        self.prop_layout.addWidget(self.pos_group)
 
         # 3. 战斗、视野与弹药
-        combat_group = QGroupBox("3. 战备与侦测参数")
-        combat_layout = QVBoxLayout(combat_group)
+        self.combat_group = QGroupBox("3. 战备与侦测参数")
+        combat_layout = QVBoxLayout(self.combat_group)
 
         vis_size_layout = QHBoxLayout()
-        vis_size_layout.addWidget(QLabel("视野尺寸:"))
+        self.lbl_vision_tag = QLabel("视野尺寸:")
+        vis_size_layout.addWidget(self.lbl_vision_tag)
         self.spin_vision = QDoubleSpinBox()
         self.spin_vision.setRange(-1.0, 2000.0)
         self.spin_vision.setSingleStep(20.0)
@@ -256,7 +266,8 @@ class MissionEditorWidget(QWidget):
         combat_layout.addLayout(vis_size_layout)
 
         ammo_layout = QHBoxLayout()
-        ammo_layout.addWidget(QLabel("携弹数量:"))
+        self.lbl_ammo_tag = QLabel("携弹数量:")
+        ammo_layout.addWidget(self.lbl_ammo_tag)
         self.spin_ammo = QSpinBox()
         self.spin_ammo.setRange(-1, 999)
         self.spin_ammo.setValue(20)
@@ -266,7 +277,8 @@ class MissionEditorWidget(QWidget):
         combat_layout.addLayout(ammo_layout)
 
         disc_layout = QHBoxLayout()
-        disc_layout.addWidget(QLabel("显形辨识度:"))
+        self.lbl_disc_tag = QLabel("显形辨识度:")
+        disc_layout.addWidget(self.lbl_disc_tag)
         self.spin_visibility = QDoubleSpinBox()
         self.spin_visibility.setRange(0.0, 1.0)
         self.spin_visibility.setSingleStep(0.1)
@@ -276,11 +288,11 @@ class MissionEditorWidget(QWidget):
         disc_layout.addWidget(self.spin_visibility)
         combat_layout.addLayout(disc_layout)
 
-        self.prop_layout.addWidget(combat_group)
+        self.prop_layout.addWidget(self.combat_group)
 
         # 4. 控制模式与战术脚本
-        ctrl_group = QGroupBox("4. 玩家操控与 AI 战术脚本")
-        ctrl_layout = QVBoxLayout(ctrl_group)
+        self.ctrl_group = QGroupBox("4. 玩家操控与 AI 战术脚本")
+        ctrl_layout = QVBoxLayout(self.ctrl_group)
 
         self.chk_controllable = QCheckBox("允许玩家手动框选或微操控制")
         self.chk_controllable.setChecked(True)
@@ -288,7 +300,8 @@ class MissionEditorWidget(QWidget):
         ctrl_layout.addWidget(self.chk_controllable)
 
         script_layout = QVBoxLayout()
-        script_layout.addWidget(QLabel("独立线程战术脚本 (AI Script):"))
+        self.lbl_script_tag = QLabel("独立线程战术脚本 (AI Script):")
+        script_layout.addWidget(self.lbl_script_tag)
         self.combo_script = QComboBox()
         self.combo_script.addItems(self._available_scripts)
         self.combo_script.currentIndexChanged.connect(self._on_prop_changed)
@@ -296,14 +309,15 @@ class MissionEditorWidget(QWidget):
         ctrl_layout.addLayout(script_layout)
 
         tactic_layout = QHBoxLayout()
-        tactic_layout.addWidget(QLabel("预置战术姿态:"))
+        self.lbl_tactic_tag = QLabel("预置战术姿态:")
+        tactic_layout.addWidget(self.lbl_tactic_tag)
         self.combo_tactic = QComboBox()
-        self.combo_tactic.addItems(["patrol (巡逻突防)", "aggressive (激进冲锋)", "defensive (固守阵地)", "guard_unit (护卫核心)"])
+        self.combo_tactic.addItems(["patrol", "aggressive", "defensive", "guard_unit"])
         self.combo_tactic.currentIndexChanged.connect(self._on_prop_changed)
         tactic_layout.addWidget(self.combo_tactic)
         ctrl_layout.addLayout(tactic_layout)
 
-        self.prop_layout.addWidget(ctrl_group)
+        self.prop_layout.addWidget(self.ctrl_group)
 
         # 5. 单位模板规格速查
         self.lbl_template_info = QLabel("单位模板规格: --")
@@ -323,13 +337,56 @@ class MissionEditorWidget(QWidget):
         self.canvas.unit_place_requested.connect(self._on_canvas_unit_placed)
         self.canvas.hover_coord_changed.connect(self._on_coord_changed)
 
+    def retranslate_ui(self):
+        self.title_label.setText(t("editor.mission.title"))
+        self.btn_add_player.setText(t("editor.mission.add_player"))
+        self.btn_add_enemy.setText(t("editor.mission.add_enemy"))
+        self.btn_del_unit.setText(t("editor.mission.del_unit"))
+        self.btn_dup_unit.setText(t("editor.mission.dup_unit"))
+        self.btn_new_mission.setText(t("editor.mission.new_mission"))
+
+        self.global_group.setTitle(t("editor.mission.rules"))
+        self.lbl_m_name_tag.setText(t("editor.mission.name"))
+        self.lbl_m_map_tag.setText(t("editor.mission.map_file"))
+        self.chk_fog.setText(t("editor.mission.fog"))
+        self.chk_ammo.setText(t("editor.mission.ammo"))
+
+        self.prop_header.setText(t("editor.mission.inspector_title"))
+        self.basic_group.setTitle(t("editor.mission.identity"))
+        self.lbl_id_tag.setText(t("editor.mission.unit_id"))
+        self.lbl_camp_tag.setText(t("editor.mission.camp"))
+
+        cur_camp_idx = self.combo_camp.currentIndex()
+        self.combo_camp.blockSignals(True)
+        self.combo_camp.clear()
+        self.combo_camp.addItems([t("editor.mission.camps.player"), t("editor.mission.camps.enemy")])
+        self.combo_camp.setCurrentIndex(cur_camp_idx)
+        self.combo_camp.blockSignals(False)
+
+        self.lbl_cfg_tag.setText(t("editor.mission.config"))
+        self.pos_group.setTitle(t("editor.mission.spawn"))
+        self.lbl_col_tag.setText(t("editor.mission.spawn"))
+        self.btn_pick_spawn.setText(t("editor.mission.pick_on_map"))
+
+        self.combat_group.setTitle(t("editor.mission.combat_props"))
+        self.lbl_vision_tag.setText(t("editor.mission.vision"))
+        self.lbl_ammo_tag.setText(t("editor.mission.ammo_cnt"))
+        self.lbl_disc_tag.setText(t("editor.mission.visibility"))
+
+        self.ctrl_group.setTitle(t("editor.mission.tactics"))
+        self.chk_controllable.setText(t("editor.mission.controllable"))
+        self.lbl_script_tag.setText(t("editor.mission.ai_script"))
+        self.lbl_tactic_tag.setText(t("editor.mission.enemy_tactic"))
+
+        self._refresh_unit_list()
+
     def _on_coord_changed(self, col: int, row: int, px: int, py: int, tile: int):
         unit_at = self.canvas._find_unit_at(col, row)
         if unit_at:
-            unit_info = f" | 目标单位: {unit_at.id} ({unit_at.config_file})"
+            unit_info = t("editor.mission.target_unit_info", id=unit_at.id, cfg=unit_at.config_file)
         else:
             unit_info = ""
-        msg = f"任务编队光标: 列 {col:02d}, 行 {row:02d} | 像素: ({px}, {py}){unit_info}"
+        msg = t("editor.mission.cursor_status", col=col, row=row, px=px, py=py, unit_info=unit_info)
         self.coord_status_changed.emit(msg)
 
     # ================= 属性面板同步与交互 =================

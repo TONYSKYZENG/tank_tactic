@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Optional, List
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton,
-    QButtonGroup, QGroupBox, QSpinBox, QLineEdit, QScrollArea, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QButtonGroup,
+    QGroupBox, QSpinBox, QLineEdit, QScrollArea, QFrame,
     QCheckBox, QMessageBox, QFileDialog, QSlider
 )
 from PyQt5.QtGui import QFont, QColor, QIcon
@@ -9,15 +9,12 @@ from PyQt5.QtCore import Qt, pyqtSignal
 
 from map_loader.models import GameMap, TileType
 from map_loader.loader import MapLoader
+from translations import i18n, t
 from .canvas import EditorCanvas, EditorMode, TerrainTool
 
 class MapEditorWidget(QWidget):
     """
-    【模式 1：可视化地图编辑】
-    - 实时显示光标的地图坐标位置
-    - 既能拖框框设置地形 (Box Fill)，又能一格一格的点 (Brush)
-    - 地图大小 (Cols, Rows, TileSize, Name) 自由设置与调整
-    - 瓦片画板：空地、可摧毁砖墙、不可摧毁钢墙、金鹰基地
+    模式 1：帝国时代2 风格地图可视化编辑工作台
     """
 
     map_modified = pyqtSignal()
@@ -27,7 +24,9 @@ class MapEditorWidget(QWidget):
         super().__init__(parent)
         self.canvas = canvas if canvas is not None else EditorCanvas()
         self.canvas.mode = EditorMode.MAP_EDIT
+        self.tile_buttons: List[QPushButton] = []
         self._init_ui()
+        self.retranslate_ui()
 
     def set_map(self, game_map: GameMap):
         self.canvas.set_map(game_map)
@@ -46,14 +45,14 @@ class MapEditorWidget(QWidget):
         left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setSpacing(12)
 
-        title_label = QLabel("⚔ 地图建造工具箱")
-        title_label.setFont(QFont("Palatino", 13, QFont.Bold))
-        title_label.setStyleSheet("color: #F1C40F; border: none;")
-        left_layout.addWidget(title_label)
+        self.title_label = QLabel("⚔ 地图建造工具箱")
+        self.title_label.setFont(QFont("Palatino", 13, QFont.Bold))
+        self.title_label.setStyleSheet("color: #F1C40F; border: none;")
+        left_layout.addWidget(self.title_label)
 
         # 1. 地形笔刷工具
-        tool_group = QGroupBox("★ 操作工具")
-        tool_layout = QVBoxLayout(tool_group)
+        self.tool_group = QGroupBox("★ 操作工具")
+        tool_layout = QVBoxLayout(self.tool_group)
 
         self.btn_brush = QPushButton("🖌 单格画笔 (Brush)")
         self.btn_brush.setCheckable(True)
@@ -76,22 +75,23 @@ class MapEditorWidget(QWidget):
         self.tool_btn_group.addButton(self.btn_box_fill)
         self.tool_btn_group.addButton(self.btn_eraser)
 
-        left_layout.addWidget(tool_group)
+        left_layout.addWidget(self.tool_group)
 
         # 2. 地形材质画板 (Tile Palette)
-        tile_group = QGroupBox("★ 瓦片材质选择")
-        tile_layout = QVBoxLayout(tile_group)
+        self.tile_group = QGroupBox("★ 瓦片材质选择")
+        tile_layout = QVBoxLayout(self.tile_group)
 
         self.tile_btn_group = QButtonGroup(self)
         self.tiles_info = [
-            (TileType.BRICK, "🧱 普通红砖墙 (可摧毁)", "#9E3B1B"),
-            (TileType.STEEL, "⛓ 强化钢铁墙 (不可摧毁)", "#B5B9C2"),
-            (TileType.EMPTY, "⬛ 荒野空地 (畅通无阻)", "#11100D"),
-            (TileType.BASE, "🦅 帝国老鹰基地 (核心)", "#D35400")
+            (TileType.BRICK, "#9E3B1B"),
+            (TileType.STEEL, "#B5B9C2"),
+            (TileType.EMPTY, "#11100D"),
+            (TileType.BASE, "#D35400")
         ]
 
-        for i, (ttype, label_text, color_code) in enumerate(self.tiles_info):
-            btn = QPushButton(f"  {label_text}")
+        self.tile_buttons = []
+        for i, (ttype, color_code) in enumerate(self.tiles_info):
+            btn = QPushButton()
             btn.setCheckable(True)
             if ttype == TileType.BRICK:
                 btn.setChecked(True)
@@ -99,37 +99,40 @@ class MapEditorWidget(QWidget):
             btn.clicked.connect(lambda checked, t=ttype: self._set_tile(t))
             tile_layout.addWidget(btn)
             self.tile_btn_group.addButton(btn, i)
+            self.tile_buttons.append(btn)
 
-        left_layout.addWidget(tile_group)
+        left_layout.addWidget(self.tile_group)
 
         # 3. 批量操作工具
-        batch_group = QGroupBox("★ 区域快捷操作")
-        batch_layout = QVBoxLayout(batch_group)
+        self.batch_group = QGroupBox("★ 区域快捷操作")
+        batch_layout = QVBoxLayout(self.batch_group)
 
-        btn_fill_all = QPushButton("🪣 当前材质填充全图")
-        btn_fill_all.clicked.connect(self._fill_all_map)
-        batch_layout.addWidget(btn_fill_all)
+        self.btn_fill_all = QPushButton("🪣 当前材质填充全图")
+        self.btn_fill_all.clicked.connect(self._fill_all_map)
+        batch_layout.addWidget(self.btn_fill_all)
 
-        btn_clear_all = QPushButton("🗑 清空全图为空地")
-        btn_clear_all.clicked.connect(self._clear_all_map)
-        batch_layout.addWidget(btn_clear_all)
+        self.btn_clear_all = QPushButton("🗑 清空全图为空地")
+        self.btn_clear_all.clicked.connect(self._clear_all_map)
+        batch_layout.addWidget(self.btn_clear_all)
 
-        left_layout.addWidget(batch_group)
+        left_layout.addWidget(self.batch_group)
 
         # 4. 地图大小与参数设置
-        size_group = QGroupBox("★ 地图大小设置")
-        size_layout = QVBoxLayout(size_group)
+        self.size_group = QGroupBox("★ 地图大小设置")
+        size_layout = QVBoxLayout(self.size_group)
 
         # 地图名称
         name_layout = QHBoxLayout()
-        name_layout.addWidget(QLabel("名称:"))
+        self.lbl_name_tag = QLabel("名称:")
+        name_layout.addWidget(self.lbl_name_tag)
         self.edit_name = QLineEdit("Custom Map")
         name_layout.addWidget(self.edit_name)
         size_layout.addLayout(name_layout)
 
         # 列数 Cols
         cols_layout = QHBoxLayout()
-        cols_layout.addWidget(QLabel("列数 (宽):"))
+        self.lbl_cols_tag = QLabel("列数 (宽):")
+        cols_layout.addWidget(self.lbl_cols_tag)
         self.spin_cols = QSpinBox()
         self.spin_cols.setRange(8, 80)
         self.spin_cols.setValue(20)
@@ -138,7 +141,8 @@ class MapEditorWidget(QWidget):
 
         # 行数 Rows
         rows_layout = QHBoxLayout()
-        rows_layout.addWidget(QLabel("行数 (高):"))
+        self.lbl_rows_tag = QLabel("行数 (高):")
+        rows_layout.addWidget(self.lbl_rows_tag)
         self.spin_rows = QSpinBox()
         self.spin_rows.setRange(8, 80)
         self.spin_rows.setValue(16)
@@ -147,7 +151,8 @@ class MapEditorWidget(QWidget):
 
         # 瓦片尺寸
         ts_layout = QHBoxLayout()
-        ts_layout.addWidget(QLabel("网格边长:"))
+        self.lbl_ts_tag = QLabel("网格边长:")
+        ts_layout.addWidget(self.lbl_ts_tag)
         self.spin_tile_size = QSpinBox()
         self.spin_tile_size.setRange(24, 48)
         self.spin_tile_size.setValue(36)
@@ -155,16 +160,16 @@ class MapEditorWidget(QWidget):
         ts_layout.addWidget(self.spin_tile_size)
         size_layout.addLayout(ts_layout)
 
-        btn_apply_size = QPushButton("✓ 应用地图大小调整")
-        btn_apply_size.setStyleSheet("background-color: #5D4037; border: 1px solid #C8A048; color: #FFF3BD;")
-        btn_apply_size.clicked.connect(self._apply_map_resize)
-        size_layout.addWidget(btn_apply_size)
+        self.btn_apply_size = QPushButton("✓ 应用地图大小调整")
+        self.btn_apply_size.setStyleSheet("background-color: #5D4037; border: 1px solid #C8A048; color: #FFF3BD;")
+        self.btn_apply_size.clicked.connect(self._apply_map_resize)
+        size_layout.addWidget(self.btn_apply_size)
 
-        left_layout.addWidget(size_group)
+        left_layout.addWidget(self.size_group)
 
         # 5. 视图辅助控制
-        view_group = QGroupBox("★ 视图控制")
-        view_layout = QVBoxLayout(view_group)
+        self.view_group = QGroupBox("★ 视图控制")
+        view_layout = QVBoxLayout(self.view_group)
 
         self.chk_grid = QCheckBox("显示网格标线")
         self.chk_grid.setChecked(True)
@@ -172,7 +177,8 @@ class MapEditorWidget(QWidget):
         view_layout.addWidget(self.chk_grid)
 
         zoom_layout = QHBoxLayout()
-        zoom_layout.addWidget(QLabel("缩放:"))
+        self.lbl_zoom_tag = QLabel("缩放:")
+        zoom_layout.addWidget(self.lbl_zoom_tag)
         btn_zoom_out = QPushButton("-")
         btn_zoom_out.setFixedWidth(28)
         btn_zoom_out.clicked.connect(lambda: self._adjust_zoom(-0.2))
@@ -185,7 +191,7 @@ class MapEditorWidget(QWidget):
         zoom_layout.addWidget(btn_zoom_in)
         view_layout.addLayout(zoom_layout)
 
-        left_layout.addWidget(view_group)
+        left_layout.addWidget(self.view_group)
 
         left_layout.addStretch()
         main_layout.addWidget(left_panel)
@@ -201,6 +207,38 @@ class MapEditorWidget(QWidget):
         # 监听画布信号
         self.canvas.hover_coord_changed.connect(self._on_coord_changed)
         self.canvas.map_modified.connect(self.map_modified.emit)
+
+    def retranslate_ui(self):
+        self.title_label.setText(t("editor.map.toolbox_title"))
+        self.tool_group.setTitle(t("editor.map.tools_group"))
+        self.btn_brush.setText(t("editor.map.brush"))
+        self.btn_box_fill.setText(t("editor.map.box_fill"))
+        self.btn_eraser.setText(t("editor.map.eraser"))
+
+        self.tile_group.setTitle(t("editor.map.tile_palette"))
+        tile_texts = [
+            t("editor.map.tiles.brick"),
+            t("editor.map.tiles.steel"),
+            t("editor.map.tiles.empty"),
+            t("editor.map.tiles.base")
+        ]
+        for btn, label_text in zip(self.tile_buttons, tile_texts):
+            btn.setText(f"  {label_text}")
+
+        self.batch_group.setTitle(t("editor.map.batch_ops"))
+        self.btn_fill_all.setText(t("editor.map.fill_all"))
+        self.btn_clear_all.setText(t("editor.map.clear_all"))
+
+        self.size_group.setTitle(t("editor.map.size_settings"))
+        self.lbl_name_tag.setText(t("editor.map.name"))
+        self.lbl_cols_tag.setText(t("editor.map.cols"))
+        self.lbl_rows_tag.setText(t("editor.map.rows"))
+        self.lbl_ts_tag.setText(t("editor.map.tile_size"))
+        self.btn_apply_size.setText(t("editor.map.apply_size"))
+
+        self.view_group.setTitle(t("editor.map.view_control"))
+        self.chk_grid.setText(t("editor.map.show_grid"))
+        self.lbl_zoom_tag.setText(t("editor.map.zoom"))
 
     def _set_tool(self, tool: str):
         self.canvas.tool = tool
@@ -224,13 +262,13 @@ class MapEditorWidget(QWidget):
 
     def _on_coord_changed(self, col: int, row: int, px: int, py: int, tile: int):
         tile_names = {
-            TileType.EMPTY: "空地 [EMPTY]",
-            TileType.BRICK: "普通红砖 [BRICK]",
-            TileType.STEEL: "不可摧毁钢墙 [STEEL]",
-            TileType.BASE: "老鹰基地 [BASE]"
+            TileType.EMPTY: t("editor.map.tiles.empty"),
+            TileType.BRICK: t("editor.map.tiles.brick"),
+            TileType.STEEL: t("editor.map.tiles.steel"),
+            TileType.BASE: t("editor.map.tiles.base")
         }
         tname = tile_names.get(tile, f"未知({tile})")
-        msg = f"光标位置: 列 {col:02d}, 行 {row:02d} | 像素: ({px}, {py}) | 地形: {tname} | 模式: 拖框/点画"
+        msg = t("editor.map.cursor_status", col=col, row=row, px=px, py=py, tile=tname)
         self.coord_status_changed.emit(msg)
 
     def _apply_map_resize(self):
@@ -268,7 +306,12 @@ class MapEditorWidget(QWidget):
     def _fill_all_map(self):
         if not self.canvas.game_map:
             return
-        reply = QMessageBox.question(self, "确认全图填充", "确定将全图所有格子替换为当前选中的材质吗？", QMessageBox.Yes | QMessageBox.No)
+        reply = QMessageBox.question(
+            self,
+            t("editor.map.confirm_fill_title"),
+            t("editor.map.confirm_fill_msg"),
+            QMessageBox.Yes | QMessageBox.No
+        )
         if reply == QMessageBox.Yes:
             tile = self.canvas.selected_tile
             for r in range(self.canvas.game_map.rows):
@@ -280,7 +323,12 @@ class MapEditorWidget(QWidget):
     def _clear_all_map(self):
         if not self.canvas.game_map:
             return
-        reply = QMessageBox.question(self, "确认清空地图", "确定清空全图所有瓦片吗？", QMessageBox.Yes | QMessageBox.No)
+        reply = QMessageBox.question(
+            self,
+            t("editor.map.confirm_clear_title"),
+            t("editor.map.confirm_clear_msg"),
+            QMessageBox.Yes | QMessageBox.No
+        )
         if reply == QMessageBox.Yes:
             for r in range(self.canvas.game_map.rows):
                 for c in range(self.canvas.game_map.cols):

@@ -9,6 +9,7 @@ from PyQt5.QtGui import QFont, QColor, QIcon
 from PyQt5.QtCore import Qt, pyqtSignal
 
 from conditions.builder import ConditionBuilder
+from translations import i18n, t
 
 class ConditionNodeType:
     # 复合逻辑节点
@@ -39,6 +40,29 @@ class ConditionEditorWidget(QWidget):
         super().__init__(parent)
         self.available_unit_ids: List[str] = []
         self._init_ui()
+        self.retranslate_ui()
+
+    def retranslate_ui(self):
+        self.tab_widget.setTabText(0, t("editor.condition.tab_victory"))
+        self.tab_widget.setTabText(1, t("editor.condition.tab_defeat"))
+
+        for tools in (self.victory_tools, self.defeat_tools):
+            if "and" in tools:
+                tools["and"].setText(t("editor.condition.add_and"))
+            if "or" in tools:
+                tools["or"].setText(t("editor.condition.add_or"))
+            if "not" in tools:
+                tools["not"].setText(t("editor.condition.add_not"))
+            if "leaf" in tools:
+                tools["leaf"].setText(t("editor.condition.add_primitive"))
+            if "delete" in tools:
+                tools["delete"].setText(t("editor.condition.del_node"))
+
+        self.prop_title.setText(t("editor.condition.node_props"))
+        self.lbl_target_unit_tag.setText(t("editor.condition.target_unit"))
+        self.lbl_survive_time_tag.setText(t("editor.condition.survive_time"))
+        self.json_group.setTitle(t("editor.condition.json_preview"))
+        self.btn_validate.setText(t("editor.condition.validate"))
 
     @property
     def unit_ids(self) -> List[str]:
@@ -84,10 +108,10 @@ class ConditionEditorWidget(QWidget):
         right_layout.setContentsMargins(10, 10, 10, 10)
         right_layout.setSpacing(12)
 
-        prop_title = QLabel("⚙ 条件节点参数配置")
-        prop_title.setFont(QFont("Palatino", 13, QFont.Bold))
-        prop_title.setStyleSheet("color: #F1C40F; border: none;")
-        right_layout.addWidget(prop_title)
+        self.prop_title = QLabel("⚙ 条件节点参数配置")
+        self.prop_title.setFont(QFont("Palatino", 13, QFont.Bold))
+        self.prop_title.setStyleSheet("color: #F1C40F; border: none;")
+        right_layout.addWidget(self.prop_title)
 
         # 节点属性编辑表单
         self.prop_box = QGroupBox("选中节点参数")
@@ -102,7 +126,8 @@ class ConditionEditorWidget(QWidget):
         self.unit_field_widget = QWidget()
         u_layout = QHBoxLayout(self.unit_field_widget)
         u_layout.setContentsMargins(0, 0, 0, 0)
-        u_layout.addWidget(QLabel("目标单位 ID:"))
+        self.lbl_target_unit_tag = QLabel("目标单位 ID:")
+        u_layout.addWidget(self.lbl_target_unit_tag)
         self.combo_target_unit = QComboBox()
         self.combo_target_unit.setEditable(True)
         self.combo_target_unit.currentTextChanged.connect(self._on_prop_input_changed)
@@ -113,7 +138,8 @@ class ConditionEditorWidget(QWidget):
         self.time_field_widget = QWidget()
         t_layout = QHBoxLayout(self.time_field_widget)
         t_layout.setContentsMargins(0, 0, 0, 0)
-        t_layout.addWidget(QLabel("存活时长 (秒):"))
+        self.lbl_survive_time_tag = QLabel("存活时长 (秒):")
+        t_layout.addWidget(self.lbl_survive_time_tag)
         self.spin_seconds = QDoubleSpinBox()
         self.spin_seconds.setRange(1.0, 3600.0)
         self.spin_seconds.setValue(30.0)
@@ -172,20 +198,20 @@ class ConditionEditorWidget(QWidget):
         right_layout.addWidget(self.prop_box)
 
         # 实时语法校验与 JSON 预览
-        json_group = QGroupBox("📜 实时条件语法预览 & 校验")
-        json_layout = QVBoxLayout(json_group)
+        self.json_group = QGroupBox("📜 实时条件语法预览 & 校验")
+        json_layout = QVBoxLayout(self.json_group)
 
         self.txt_json_preview = QPlainTextEdit()
         self.txt_json_preview.setReadOnly(True)
         self.txt_json_preview.setStyleSheet("font-family: 'Courier New'; font-size: 11px; background: #12100E; color: #58D68D; border: 1px solid #3E301E;")
         json_layout.addWidget(self.txt_json_preview)
 
-        btn_validate = QPushButton("✓ 校验条件语法合法性")
-        btn_validate.setStyleSheet("background-color: #27AE60; border: 1px solid #A9DFBF; color: #FFFFFF;")
-        btn_validate.clicked.connect(self._validate_current_conditions)
-        json_layout.addWidget(btn_validate)
+        self.btn_validate = QPushButton("✓ 校验条件语法合法性")
+        self.btn_validate.setStyleSheet("background-color: #27AE60; border: 1px solid #A9DFBF; color: #FFFFFF;")
+        self.btn_validate.clicked.connect(self._validate_current_conditions)
+        json_layout.addWidget(self.btn_validate)
 
-        right_layout.addWidget(json_group)
+        right_layout.addWidget(self.json_group)
 
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 3)
@@ -590,11 +616,23 @@ class ConditionEditorWidget(QWidget):
         tree = self._get_active_tree()
         cond_dict = self._serialize_tree(tree)
         if not cond_dict:
-            QMessageBox.information(self, "校验通过", "当前树为空，采用引擎默认胜负判定规则。")
+            QMessageBox.information(
+                self,
+                t("editor.condition.val_pass_empty_title"),
+                t("editor.condition.val_pass_empty_msg")
+            )
             return
 
         try:
             built_condition = ConditionBuilder.build(cond_dict)
-            QMessageBox.information(self, "✓ 语法校验成功", f"恭喜！树状逻辑构建完全合法。\n解析得到对象: {built_condition.__class__.__name__}")
+            QMessageBox.information(
+                self,
+                t("editor.condition.val_pass_title"),
+                t("editor.condition.val_pass_msg", cls=built_condition.__class__.__name__)
+            )
         except Exception as e:
-            QMessageBox.critical(self, "✕ 语法校验失败", f"条件语法解析发生异常:\n{e}")
+            QMessageBox.critical(
+                self,
+                t("editor.condition.val_fail_title"),
+                t("editor.condition.val_fail_msg", err=str(e))
+            )

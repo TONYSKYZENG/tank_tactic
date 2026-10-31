@@ -7,7 +7,7 @@ from typing import Optional
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QStackedWidget, QFileDialog, QMessageBox, QStatusBar, QToolBar, QAction
+    QStackedWidget, QFileDialog, QMessageBox, QStatusBar, QToolBar, QAction, QComboBox
 )
 from PyQt5.QtGui import QFont, QIcon, QColor
 from PyQt5.QtCore import Qt
@@ -16,6 +16,7 @@ from map_loader.models import GameMap, TileType
 from map_loader.loader import MapLoader
 from mission_loader.models import Mission
 from mission_loader.loader import MissionLoader
+from translations import i18n, t
 
 from .theme import AOE2_STYLE
 from .canvas import EditorCanvas, EditorMode
@@ -47,6 +48,8 @@ class EditorMainWindow(QMainWindow):
         self.setStyleSheet(AOE2_STYLE)
 
         self._init_ui()
+        self.retranslate_ui()
+        i18n.language_changed.connect(self._on_i18n_changed)
         self._load_initial_defaults()
 
     def _init_ui(self):
@@ -86,40 +89,55 @@ class EditorMainWindow(QMainWindow):
         file_btn_layout = QHBoxLayout()
         file_btn_layout.setSpacing(6)
 
-        btn_new_map = QPushButton("🗺 新建地图")
-        btn_new_map.clicked.connect(self._on_new_map)
-        file_btn_layout.addWidget(btn_new_map)
+        self.btn_new_map = QPushButton("🗺 新建地图")
+        self.btn_new_map.clicked.connect(self._on_new_map)
+        file_btn_layout.addWidget(self.btn_new_map)
 
-        btn_open_map = QPushButton("📂 打开地图")
-        btn_open_map.clicked.connect(self._on_open_map)
-        file_btn_layout.addWidget(btn_open_map)
+        self.btn_open_map = QPushButton("📂 打开地图")
+        self.btn_open_map.clicked.connect(self._on_open_map)
+        file_btn_layout.addWidget(self.btn_open_map)
 
-        btn_save_map = QPushButton("💾 保存地图")
-        btn_save_map.setStyleSheet("color: #F7DC6F;")
-        btn_save_map.clicked.connect(self._on_save_map)
-        file_btn_layout.addWidget(btn_save_map)
+        self.btn_save_map = QPushButton("💾 保存地图")
+        self.btn_save_map.setStyleSheet("color: #F7DC6F;")
+        self.btn_save_map.clicked.connect(self._on_save_map)
+        file_btn_layout.addWidget(self.btn_save_map)
 
         sep = QLabel("|")
         sep.setStyleSheet("color: #6C5531; font-weight: bold;")
         file_btn_layout.addWidget(sep)
 
-        btn_new_mission = QPushButton("⚔ 新建任务")
-        btn_new_mission.clicked.connect(self._on_new_mission)
-        file_btn_layout.addWidget(btn_new_mission)
+        self.btn_new_mission = QPushButton("⚔ 新建任务")
+        self.btn_new_mission.clicked.connect(self._on_new_mission)
+        file_btn_layout.addWidget(self.btn_new_mission)
 
-        btn_open_mission = QPushButton("📂 打开任务")
-        btn_open_mission.clicked.connect(self._on_open_mission)
-        file_btn_layout.addWidget(btn_open_mission)
+        self.btn_open_mission = QPushButton("📂 打开任务")
+        self.btn_open_mission.clicked.connect(self._on_open_mission)
+        file_btn_layout.addWidget(self.btn_open_mission)
 
-        btn_save_mission = QPushButton("💾 保存任务")
-        btn_save_mission.setStyleSheet("color: #F7DC6F; background-color: #3E2723;")
-        btn_save_mission.clicked.connect(self._on_save_mission)
-        file_btn_layout.addWidget(btn_save_mission)
+        self.btn_save_mission = QPushButton("💾 保存任务")
+        self.btn_save_mission.setStyleSheet("color: #F7DC6F; background-color: #3E2723;")
+        self.btn_save_mission.clicked.connect(self._on_save_mission)
+        file_btn_layout.addWidget(self.btn_save_mission)
 
-        btn_run_game = QPushButton("▶ 启动游戏实战测试")
-        btn_run_game.setStyleSheet("background-color: #196F3D; border: 2px solid #52BE80; color: #EAFAF1;")
-        btn_run_game.clicked.connect(self._on_run_game_test)
-        file_btn_layout.addWidget(btn_run_game)
+        self.btn_run_game = QPushButton("▶ 启动游戏实战测试")
+        self.btn_run_game.setStyleSheet("background-color: #196F3D; border: 2px solid #52BE80; color: #EAFAF1;")
+        self.btn_run_game.clicked.connect(self._on_run_game_test)
+        file_btn_layout.addWidget(self.btn_run_game)
+
+        sep2 = QLabel("|")
+        sep2.setStyleSheet("color: #6C5531; font-weight: bold;")
+        file_btn_layout.addWidget(sep2)
+
+        self.combo_lang = QComboBox()
+        self.combo_lang.addItems(["🌐 中文", "🌐 English"])
+        self.combo_lang.setCurrentIndex(0 if i18n.get_language() == "zh" else 1)
+        self.combo_lang.setStyleSheet(
+            "QComboBox { background-color: #2D2319; color: #F1C40F; border: 1px solid #7D5C2C; "
+            "border-radius: 3px; padding: 3px 8px; font-weight: bold; } "
+            "QComboBox QAbstractItemView { background-color: #221A12; color: #F1C40F; selection-background-color: #5C482C; }"
+        )
+        self.combo_lang.currentIndexChanged.connect(self._on_lang_combo_changed)
+        file_btn_layout.addWidget(self.combo_lang)
 
         top_bar.addLayout(file_btn_layout)
         main_layout.addLayout(top_bar)
@@ -162,6 +180,40 @@ class EditorMainWindow(QMainWindow):
             return self.mission_editor.canvas
         return self.map_editor.canvas
 
+    def _on_lang_combo_changed(self, idx: int):
+        new_lang = "zh" if idx == 0 else "en"
+        i18n.set_language(new_lang)
+
+    def _on_i18n_changed(self, lang: str):
+        self.combo_lang.blockSignals(True)
+        self.combo_lang.setCurrentIndex(0 if lang == "zh" else 1)
+        self.combo_lang.blockSignals(False)
+        self.retranslate_ui()
+
+    def retranslate_ui(self):
+        self.setWindowTitle(t("editor.window_title"))
+        self.btn_mode_map.setText(t("editor.modes.map"))
+        self.btn_mode_unit.setText(t("editor.modes.mission"))
+        self.btn_mode_cond.setText(t("editor.modes.condition"))
+
+        self.btn_new_map.setText(t("editor.buttons.new_map"))
+        self.btn_open_map.setText(t("editor.buttons.open_map"))
+        self.btn_save_map.setText(t("editor.buttons.save_map"))
+        self.btn_new_mission.setText(t("editor.buttons.new_mission"))
+        self.btn_open_mission.setText(t("editor.buttons.open_mission"))
+        self.btn_save_mission.setText(t("editor.buttons.save_mission"))
+        self.btn_run_game.setText(t("editor.buttons.run_game"))
+
+        self._update_file_info()
+        self._switch_mode(self.stack.currentIndex())
+
+        if hasattr(self, "map_editor") and hasattr(self.map_editor, "retranslate_ui"):
+            self.map_editor.retranslate_ui()
+        if hasattr(self, "mission_editor") and hasattr(self.mission_editor, "retranslate_ui"):
+            self.mission_editor.retranslate_ui()
+        if hasattr(self, "condition_editor") and hasattr(self.condition_editor, "retranslate_ui"):
+            self.condition_editor.retranslate_ui()
+
     def switch_mode(self, index: int):
         self._switch_mode(index)
 
@@ -173,16 +225,16 @@ class EditorMainWindow(QMainWindow):
 
         if index == 0:
             self.map_editor.canvas.update()
-            self._update_status_msg("当前模式: ⚔ 地图建造模式 (支持拖框批量填充与单格材质点画)")
+            self._update_status_msg(t("editor.status.mode_map"))
         elif index == 1:
             self.mission_editor.canvas.set_units(self.mission_editor.player_units, self.mission_editor.enemies)
             self.mission_editor.canvas.update()
-            self._update_status_msg("当前模式: 🛡 任务单位编队模式 (可在地图上直接点选与拖拽设置单位出生点)")
+            self._update_status_msg(t("editor.status.mode_unit"))
         elif index == 2:
             all_units = self.mission_editor.player_units + self.mission_editor.enemies
             unit_ids = [u.id for u in all_units]
             self.condition_editor.set_unit_ids(unit_ids)
-            self._update_status_msg("当前模式: 📜 胜负条件树模式 (树形层级可视化多级逻辑嵌套编排)")
+            self._update_status_msg(t("editor.status.mode_cond"))
 
     def _on_map_modified(self):
         if self.current_map:
@@ -238,7 +290,7 @@ class EditorMainWindow(QMainWindow):
     def _update_file_info(self):
         m_name = self.current_map.name if self.current_map else "--"
         mis_name = self.mission_editor.edit_mission_name.text() if hasattr(self, "mission_editor") else "--"
-        self.lbl_file_info.setText(f"当前地图: {m_name} | 当前任务: {mis_name}")
+        self.lbl_file_info.setText(t("editor.status.current_file", map=m_name, mission=mis_name))
 
     def _on_new_map(self):
         new_map = GameMap(

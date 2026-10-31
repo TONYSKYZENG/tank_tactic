@@ -1,7 +1,8 @@
 import random
-from typing import List, Optional, Tuple
+import time
+from typing import List, Optional, Tuple, Dict
 from map_loader.models import GameMap, TileType
-from .entities import Tank, Bullet, Direction, Rect, Camp
+from .entities import Tank, Bullet, Direction, Rect, Camp, EnemyMemoryEntry
 
 class PhysicsEngine:
     def __init__(self, game_map: GameMap, fog_of_war_enabled: bool = True,
@@ -13,6 +14,10 @@ class PhysicsEngine:
         self.player_tanks: List[Tank] = []
         self.enemy_tanks: List[Tank] = []
         self.bullets: List[Bullet] = []
+
+        # ===== 敌方全局记忆系统 (Enemy Memory) =====
+        # 记录被实锤发现过的敌军最后坐标、类型与追踪状态
+        self.enemy_memory: Dict[str, EnemyMemoryEntry] = {}
 
     @property
     def player_tank(self) -> Optional[Tank]:
@@ -108,6 +113,36 @@ class PhysicsEngine:
                     else:
                         if enemy.spotted_timer <= 0:
                             enemy.is_spotted = False
+
+            # ===== 敌方全局记忆系统更新 =====
+            # 1. 一旦被任何我方实锤发现 (带视野 + 带可见度)，建立或更新字典
+            if enemy.is_spotted:
+                u_type = getattr(enemy, "unit_type", None)
+                if not u_type:
+                    cfg = getattr(enemy, "_config", None)
+                    u_type = cfg.name if cfg else "tank"
+
+                if enemy.id not in self.enemy_memory:
+                    self.enemy_memory[enemy.id] = EnemyMemoryEntry(
+                        enemy_id=enemy.id,
+                        x=enemy.x,
+                        y=enemy.y,
+                        size=enemy.size,
+                        unit_type=u_type,
+                        color=enemy.color,
+                        is_tracking=True,
+                        last_seen_time=time.time()
+                    )
+                else:
+                    mem = self.enemy_memory[enemy.id]
+                    mem.x = enemy.x
+                    mem.y = enemy.y
+                    mem.is_tracking = True
+                    mem.last_seen_time = time.time()
+            else:
+                # 2. 如果跟丢了 (不再处于视野或未通过辨识度)，仅标记 is_tracking 为 False，保留最后一次坐标
+                if enemy.id in self.enemy_memory:
+                    self.enemy_memory[enemy.id].is_tracking = False
 
     def get_visible_enemies(self) -> List[Tank]:
         """获取当前对我方可见的所有敌军坦克 (迷雾外的敌军无法被追踪或攻击)"""
@@ -300,6 +335,9 @@ class PhysicsEngine:
 
         # 坦克碰撞
         all_tanks = self.get_all_active_tanks()
+        sight_rects = self.get_player_sight_rects()
+        has_full_vision = any(p.vision_size < 0 for p in self.player_tanks if p.alive)
+
         for bullet in self.bullets:
             if not bullet.alive:
                 continue
@@ -307,8 +345,14 @@ class PhysicsEngine:
             for tank in all_tanks:
                 if tank.alive and tank.camp != bullet.camp:
                     if bullet.rect.collides_with(tank.rect):
-                        tank.take_damage(1)
+                        killed = tank.take_damage(1)
                         bullet.alive = False
+
+                        # 只有在我方单位看见了敌方单位被杀死的情况下，才能删除字典项目
+                        if killed and tank.camp == Camp.ENEMY:
+                            was_seen = (not self.fog_of_war_enabled) or has_full_vision or tank.is_spotted or any(tank.rect.collides_with(sr) for sr in sight_rects)
+                            if was_seen and tank.id in self.enemy_memory:
+                                del self.enemy_memory[tank.id]
                         break
 
         self.bullets = [b for b in self.bullets if b.alive]

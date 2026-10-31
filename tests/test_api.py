@@ -12,7 +12,7 @@ if str(BASE_DIR) not in sys.path:
 
 from PyQt5.QtCore import QCoreApplication
 from map_loader.models import GameMap
-from physics.entities import Tank, Camp, Direction
+from physics.entities import Tank, Bullet, Camp, Direction
 from physics.engine import PhysicsEngine
 from command.dispatcher import CommandDispatcher
 from command.tactics_mode import TacticMode
@@ -175,6 +175,68 @@ class TestGameAPI(unittest.TestCase):
                 found_prob += 1
 
         self.assertTrue(0 < found_prob <= trials)
+
+    def test_enemy_memory_lifecycle(self):
+        """测试敌军记忆机制：发现追踪、跟丢保留最后坐标、目击死亡删除、盲杀保留记忆"""
+        physics = self.mock_game.physics_engine
+        physics.fog_of_war_enabled = True
+        physics.enemy_memory.clear()
+
+        # 1. 视线外的敌军不会进入记忆
+        e_stealth = Tank(x=550, y=550, size=28, speed=2.0, camp=Camp.ENEMY, tank_id="e_stealth", unit_type="Fast Tank")
+        physics.add_enemy_tank(e_stealth)
+        physics.update_vision_and_stealth()
+        self.assertNotIn("e_stealth", physics.enemy_memory)
+
+        # 2. 敌军进入我方视线 (p1在100,100, vision_size=200) -> 实锤发现并建立记忆
+        e_stealth.x, e_stealth.y = 120, 120
+        physics.update_vision_and_stealth()
+        self.assertIn("e_stealth", physics.enemy_memory)
+        mem = physics.enemy_memory["e_stealth"]
+        self.assertTrue(mem.is_tracking)
+        self.assertEqual(mem.x, 120)
+        self.assertEqual(mem.y, 120)
+        self.assertEqual(mem.unit_type, "Fast Tank")
+
+        # 3. 敌军移动到视野外 (跟丢) -> is_tracking=False，但最后坐标保持在 (120, 120)
+        e_stealth.x, e_stealth.y = 560, 560
+        physics.update_vision_and_stealth()
+        self.assertIn("e_stealth", physics.enemy_memory)
+        self.assertFalse(mem.is_tracking)
+        self.assertEqual(mem.x, 120)
+        self.assertEqual(mem.y, 120)
+
+        # 4. api.list_enemy_mem 列出记忆
+        resp_mem = json.loads(self.controller.handle_request(json.dumps({"action": "api.list_enemy_mem"})))
+        self.assertEqual(resp_mem["status"], "ok")
+        self.assertIn("e_stealth", resp_mem["unit_ids"])
+        self.assertIn("e_stealth", resp_mem["lost"])
+
+        # 5. api.report_enemy: 只报告最后坐标和类型，绝不报告 hp、speed、ammo 等
+        resp_rep = json.loads(self.controller.handle_request(json.dumps({"action": "api.report_enemy", "unit_id": "e_stealth"})))
+        self.assertEqual(resp_rep["status"], "ok")
+        rep = resp_rep["report"]
+        self.assertEqual(rep["id"], "e_stealth")
+        self.assertEqual(rep["unit_type"], "Fast Tank")
+        self.assertEqual(rep["last_x"], 120.0)
+        self.assertEqual(rep["last_y"], 120.0)
+        self.assertFalse(rep["is_tracking"])
+        self.assertNotIn("hp", rep)
+        self.assertNotIn("speed", rep)
+        self.assertNotIn("ammo", rep)
+
+        # 6. 目击敌方被杀死：实锤目击死亡 -> 从记忆中删除
+        e_stealth.x, e_stealth.y = 120, 120
+        physics.update_vision_and_stealth()
+        self.assertTrue(physics.enemy_memory["e_stealth"].is_tracking)
+
+        # 发射我方炮弹击杀之
+        bullet = Bullet(x=120, y=120, direction=Direction.DOWN, speed=5.0, size=8, camp=Camp.PLAYER)
+        physics.bullets.append(bullet)
+        physics.update_bullets()
+        self.assertFalse(e_stealth.alive)
+        # 亲眼目睹被击杀，应已被清除出全局记忆
+        self.assertNotIn("e_stealth", physics.enemy_memory)
 
     def test_command_batch_operations(self):
         """测试 API 5: command_move / attack / set_tactic / set_guard"""

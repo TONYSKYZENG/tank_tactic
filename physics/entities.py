@@ -70,14 +70,29 @@ class Bullet:
         self.y += self.direction.dy * self.speed
 
 
+@dataclass
+class EnemyMemoryEntry:
+    """敌军记忆体实体：记录被实锤发现过的敌军最后坐标与追踪状态"""
+    enemy_id: str
+    x: float
+    y: float
+    size: int
+    unit_type: str
+    color: str
+    is_tracking: bool
+    last_seen_time: float = 0.0
+
+
 class Tank:
     def __init__(self, x: float, y: float, size: int = 36, speed: float = 3.0,
                  camp: Camp = Camp.PLAYER, color: str = "#E69C24",
                  health: int = 1, tank_id: str = "tank",
                  vision_size: float = -1.0, ammo: int = -1, visibility: float = 1.0,
                  is_tower: bool = False, can_attack: bool = True, tower_type: str = "general",
-                 resupply_radius: float = 0.0, resupply_interval: int = 30):
+                 resupply_radius: float = 0.0, resupply_interval: int = 30,
+                 unit_type: str = "tank"):
         self.id = tank_id
+        self.unit_type = unit_type
         self.x = x
         self.y = y
         self.size = size

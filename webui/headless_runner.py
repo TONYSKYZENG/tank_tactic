@@ -126,7 +126,8 @@ class HeadlessGameRunner(QObject):
                 can_attack=cfg.can_attack,
                 tower_type=cfg.tower_type,
                 resupply_radius=cfg.resupply_radius,
-                resupply_interval=cfg.resupply_interval
+                resupply_interval=cfg.resupply_interval,
+                unit_type=cfg.name
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -157,7 +158,8 @@ class HeadlessGameRunner(QObject):
                 can_attack=cfg.can_attack,
                 tower_type=cfg.tower_type,
                 resupply_radius=cfg.resupply_radius,
-                resupply_interval=cfg.resupply_interval
+                resupply_interval=cfg.resupply_interval,
+                unit_type=cfg.name
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -397,6 +399,11 @@ class HeadlessGameRunner(QObject):
                 self.game_map.pixel_height,
                 sight_rects
             )
+
+        # 跟丢敌军记忆残影 (虚线框标记最后一次坐标)
+        for mem in self.physics_engine.enemy_memory.values():
+            if not mem.is_tracking:
+                PixelRenderer.draw_lost_enemy_memory(painter, mem)
 
         if self.command_marker:
             mx, my, is_atk, _ = self.command_marker

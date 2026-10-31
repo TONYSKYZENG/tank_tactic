@@ -384,3 +384,25 @@ class PixelRenderer:
 
         fog_painter.end()
         painter.drawImage(0, 0, fog_img)
+
+    @staticmethod
+    def draw_lost_enemy_memory(painter: QPainter, mem) -> None:
+        """
+        绘制跟丢敌军记忆残影：
+        使用醒目的红色虚线框标记，标注问号及单位类型，只标记最后一次发现的坐标
+        """
+        painter.save()
+        rect = QRectF(mem.x, mem.y, mem.size, mem.size)
+
+        # 红色虚线框
+        pen = QPen(QColor(231, 76, 60, 220), 1.8, Qt.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(QColor(231, 76, 60, 35))
+        painter.drawRect(rect)
+
+        # 居中文本标记 ? 及单位类型
+        painter.setPen(QPen(QColor(231, 76, 60, 255)))
+        font = QFont("Courier New", 8, QFont.Bold)
+        painter.setFont(font)
+        painter.drawText(rect, Qt.AlignCenter, f"?\n{mem.unit_type}")
+        painter.restore()

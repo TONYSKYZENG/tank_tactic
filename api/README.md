@@ -235,11 +235,73 @@ Lists currently active enemy tank IDs (comma-separated). Supports two operationa
 
 ---
 
-### 7. Tactical Command APIs
+### 7. `api.list_enemy_mem`
+
+Accesses the **Global Enemy Memory** registry.
+
+> [!NOTE]
+> **Enemy Memory Mechanism**:
+> - **Spotting & Memory Creation**: Whenever an enemy unit is legitimately detected in real-time by any surviving friendly unit (both line-of-sight and visibility probability check succeeded), a persistent memory record is established.
+> - **Continuous Tracking**: While the enemy remains visible in friendly sight, its coordinate is continuously refreshed, and `is_tracking` is set to `true`.
+> - **Lost Tracking**: When the enemy slips away into fog-of-war or escapes line-of-sight, `is_tracking` switches to `false`. Its **last known coordinates** remain frozen in memory. In GUI / headless stream, lost enemies are rendered as a **dashed bounding box** marking their last confirmed location.
+> - **Witnessed Death Deletion Rule**: An enemy is removed from the memory registry **ONLY IF** friendly units witness its destruction (i.e. it is visible to friendly forces at the exact moment of its elimination). Enemies destroyed unseen in fog remain in memory until scouted.
+
+#### Request:
+```json
+{"action": "api.list_enemy_mem"}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "unit_ids": "e_patrol_1,e_hunter_1",
+  "count": 2,
+  "tracked": ["e_patrol_1"],
+  "lost": ["e_hunter_1"]
+}
+```
+
+---
+
+### 8. `api.report_enemy`
+
+Retrieves intelligence regarding a specific enemy unit stored in the memory registry.
+
+> [!CAUTION]
+> **Strict Operational Security**:
+> Enemy internal combat statistics—such as **HP, max HP, movement speed, fire cooldown, and ammunition—are strictly classified and NEVER revealed**. Only the last known coordinates, unit type, and tracking state are reported.
+
+#### Request:
+```json
+{
+  "action": "api.report_enemy",
+  "unit_id": "e_hunter_1"
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "report": {
+    "id": "e_hunter_1",
+    "unit_type": "Enemy Heavy Tank",
+    "last_x": 420.5,
+    "last_y": 180.0,
+    "is_tracking": false,
+    "last_seen_time": 1730349120.45
+  }
+}
+```
+
+---
+
+### 9. Tactical Command APIs
 
 Batch operations target units identified by `unit_ids` (either a comma-separated string `"id1,id2"` or a JSON array `["id1", "id2"]`).
 
-#### 7.1 `api.command_move`
+#### 9.1 `api.command_move`
 Directs targeted units to navigate to destination coordinates `(x, y)` in formation.
 ```json
 {
@@ -260,7 +322,7 @@ Directs targeted units to navigate to destination coordinates `(x, y)` in format
 }
 ```
 
-#### 7.2 `api.command_attack`
+#### 9.2 `api.command_attack`
 Orders targeted units to focus fire on a specific enemy tank or location.
 ```json
 {
@@ -280,7 +342,7 @@ Orders targeted units to focus fire on a specific enemy tank or location.
 }
 ```
 
-#### 7.3 `api.command_set_tactic`
+#### 9.3 `api.command_set_tactic`
 Updates the combat posture of targeted units. Supported postures:
 - `"aggressive"` / `"1"`: Engage enemies on sight.
 - `"defensive"` / `"2"`: Hold position, defend localized perimeter.
@@ -305,7 +367,7 @@ Updates the combat posture of targeted units. Supported postures:
 }
 ```
 
-#### 7.4 `api.command_set_guard`
+#### 9.4 `api.command_set_guard`
 Assigns targeted units to closely escort and protect a specific friendly unit (e.g., the Supply Fortress).
 ```json
 {
@@ -327,7 +389,7 @@ Assigns targeted units to closely escort and protect a specific friendly unit (e
 
 ---
 
-### 8. `api.report`
+### 10. `api.report`
 
 Requests a complete telemetry and status report for a specific friendly unit.
 
@@ -392,7 +454,9 @@ python3 tests/cli_client.py --cmd "move player_alpha 200 300"
 | `status` | Check victory & defeat status |
 | `list` | List surviving friendly unit IDs |
 | `list_enemy [god]` | List currently visible enemy IDs (or all if `god`) |
-| `report <id>` | Query comprehensive telemetry of a unit |
+| `list_enemy_mem` | List enemy IDs recorded in global memory (tracked & lost) |
+| `report <id>` | Query comprehensive telemetry of a friendly unit |
+| `report_enemy <id>` | Query last known coordinates & unit type of enemy in memory |
 | `move <ids> <x> <y>` | Dispatch batch movement orders |
 | `attack <ids> <enemy_id>` | Order batch focus fire |
 | `tactic <ids> <mode>` | Set combat tactic (`aggressive`, `defensive`, etc.) |

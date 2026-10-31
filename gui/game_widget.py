@@ -159,7 +159,8 @@ class GameCanvasWidget(QWidget):
                 can_attack=cfg.can_attack,
                 tower_type=cfg.tower_type,
                 resupply_radius=cfg.resupply_radius,
-                resupply_interval=cfg.resupply_interval
+                resupply_interval=cfg.resupply_interval,
+                unit_type=cfg.name
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -191,7 +192,8 @@ class GameCanvasWidget(QWidget):
                 can_attack=cfg.can_attack,
                 tower_type=cfg.tower_type,
                 resupply_radius=cfg.resupply_radius,
-                resupply_interval=cfg.resupply_interval
+                resupply_interval=cfg.resupply_interval,
+                unit_type=cfg.name
             )
             tank.fire_cooldown_max = cfg.fire_cooldown
             tank._config = cfg
@@ -475,12 +477,17 @@ class GameCanvasWidget(QWidget):
                 sight_rects
             )
 
-        # 7. 指令标记
+        # 7. 跟丢敌军记忆残影 (只标记最后一次发现的坐标，红色虚线框显示)
+        for mem in self.physics_engine.enemy_memory.values():
+            if not mem.is_tracking:
+                PixelRenderer.draw_lost_enemy_memory(painter, mem)
+
+        # 8. 指令标记
         if self.command_marker:
             mx, my, is_atk, _ = self.command_marker
             PixelRenderer.draw_command_marker(painter, mx, my, is_attack=is_atk)
 
-        # 8. 帝国时代拉框矩形
+        # 9. 帝国时代拉框矩形
         if self.is_dragging_box:
             PixelRenderer.draw_selection_box(
                 painter,

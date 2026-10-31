@@ -84,6 +84,10 @@ class GameAPIController:
             return self.list_current_unit_id(params)
         elif action in ("list_enemy_curr", "list_enemies", "list_enemy"):
             return self.list_enemy_curr(params)
+        elif action in ("list_enemy_mem", "enemy_mem", "list_memory", "memory"):
+            return self.list_enemy_mem(params)
+        elif action in ("report_enemy", "enemy_report"):
+            return self.report_enemy(params)
 
         # 5. 批量指令操作
         elif action in ("command_move", "move"):
@@ -252,6 +256,61 @@ class GameAPIController:
             "count": len(spotted_enemy_ids),
             "mode": "vision",
             "total_enemies": len(alive_enemies)
+        }
+
+    # ================= api.list_enemy_mem / api.report_enemy =================
+
+    def list_enemy_mem(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        只访问当前全局记忆列出记忆中的敌方单位 ID (以逗号隔开)。
+        包括当前追踪中 (tracked) 与跟丢了的 (lost) 记忆项目。
+        """
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        memory = getattr(physics, "enemy_memory", {})
+        mem_ids = list(memory.keys())
+        tracked = [mid for mid, entry in memory.items() if entry.is_tracking]
+        lost = [mid for mid, entry in memory.items() if not entry.is_tracking]
+
+        return {
+            "status": "ok",
+            "unit_ids": ",".join(mem_ids),
+            "count": len(mem_ids),
+            "tracked": tracked,
+            "lost": lost
+        }
+
+    def report_enemy(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        根据提供的 ID 查找敌军记忆体。
+        严格限制安全边界：敌方单位的 HP、速度、弹药等属性永远不可见，
+        只能报告其最后一次更新的坐标和单位类型。
+        """
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        unit_id = str(params.get("unit_id") or params.get("id") or "").strip()
+        if not unit_id:
+            return {"status": "error", "error": "Missing 'unit_id' parameter"}
+
+        memory = getattr(physics, "enemy_memory", {})
+        if unit_id not in memory:
+            return {"status": "error", "error": f"Enemy unit '{unit_id}' not found in memory"}
+
+        entry = memory[unit_id]
+        return {
+            "status": "ok",
+            "report": {
+                "id": entry.enemy_id,
+                "unit_type": entry.unit_type,
+                "last_x": round(entry.x, 2),
+                "last_y": round(entry.y, 2),
+                "is_tracking": entry.is_tracking,
+                "last_seen_time": round(entry.last_seen_time, 2)
+            }
         }
 
     # ================= 5. api.command_* 批量指令 =================

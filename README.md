@@ -276,7 +276,35 @@ python3 tanks.py --monitor-host 0.0.0.0 --monitor-port 9999
   }
   ```
 
-#### 5. `api.command_move` / `attack` / `set_tactic` / `set_guard`
+#### 5. `api.list_enemy_mem` 与 `api.report_enemy` (全局敌军记忆系统)
+- **记忆机制**：
+  - 一旦敌军被我方实锤发现（视线重叠且辨识度判定成功），立即在全局记忆字典建档；
+  - 敌军保持在视野内时持续更新最新坐标，`is_tracking` 为 `true`；
+  - 敌军脱离视野（跟丢）时停止追踪（`is_tracking = false`），并**在 GUI 画面上以红色虚线方框标记其最后一次被发现的坐标**；
+  - **目击消灭删除规则**：**只有当我方亲眼目睹该敌军被击毁时**，才将其从记忆字典中彻底清除。
+- **`api.list_enemy_mem`**：只访问当前全局记忆，返回记忆中的敌方单位 ID 串（包含当前正在追踪的与跟丢的）。
+- **`api.report_enemy`**：查询记忆体中的敌军状态。**严守安全规则：敌方单位的 HP、速度、弹药等属性永远不可见**，仅报告最后发现坐标与单位类型。
+- **请求示例**：
+  ```json
+  {"action": "api.list_enemy_mem"}
+  {"action": "api.report_enemy", "unit_id": "e_fast_1"}
+  ```
+- **响应示例**：
+  ```json
+  {
+    "status": "ok",
+    "report": {
+      "id": "e_fast_1",
+      "unit_type": "Enemy Fast Tank",
+      "last_x": 384.0,
+      "last_y": 192.0,
+      "is_tracking": false,
+      "last_seen_time": 1730349120.45
+    }
+  }
+  ```
+
+#### 6. `api.command_move` / `attack` / `set_tactic` / `set_guard`
 - **功能**：按照指定 `unit_ids` 批量对己方单位下发控制指令。
 - **批量移动**：
   ```json
@@ -295,7 +323,7 @@ python3 tanks.py --monitor-host 0.0.0.0 --monitor-port 9999
   {"action": "api.command_set_guard", "unit_ids": "player_alpha", "target_id": "core_supply_base"}
   ```
 
-#### 6. `api.report`
+#### 7. `api.report`
 - **功能**：令指定 `unit_id` 的己方单位汇报所有属性（战术、弹药、速度、HP、位置等）。
 - **请求格式**：
   ```json

@@ -74,7 +74,9 @@ class TanksConsoleClient:
   status / is_success            - Check victory / defeat condition status
   list / units                   - List currently alive friendly unit IDs
   list_enemy [god] / enemies     - List currently visible enemy IDs (or all if 'god')
+  list_enemy_mem / memory        - List enemies recorded in global memory (tracked & lost)
   report <unit_id>               - Report all attributes of a friendly unit
+  report_enemy <enemy_id>        - Report last known position & unit type of enemy in memory
   move <ids> <x> <y>             - Move unit(s) to destination (x, y)
   attack <ids> <target_enemy_id> - Focus fire attack on target enemy
   tactic <ids> <mode>            - Set tactic (aggressive | defensive | manual | guard)
@@ -138,6 +140,13 @@ Examples:
         elif cmd in ("list_enemy", "list_enemies", "enemies", "list_enemy_curr", "api.list_enemy_curr"):
             god_mode = len(args) > 0 and args[0].lower() in ("god", "--god", "-g", "all", "true")
             payload = {"action": "api.list_enemy_curr", "god_mode": god_mode}
+        elif cmd in ("list_enemy_mem", "enemy_mem", "memory", "list_memory", "api.list_enemy_mem"):
+            payload = {"action": "api.list_enemy_mem"}
+        elif cmd in ("report_enemy", "enemy_report", "api.report_enemy"):
+            if not args:
+                print("❌ Usage: report_enemy <enemy_id>")
+                return True
+            payload = {"action": "api.report_enemy", "unit_id": args[0]}
         elif cmd in ("terminate", "api.terminate"):
             payload = {"action": "api.terminate"}
         elif cmd in ("ping", "api.ping"):

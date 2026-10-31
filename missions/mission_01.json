@@ -3,158 +3,84 @@
   "map_file": "maps/level_01.json",
   "fog_of_war": true,
   "limited_ammo": true,
+  "player_initial_resources": {
+    "dark_matter": 0.0,
+    "alloy": 0.0
+  },
+  "enemy_initial_resources": {
+    "dark_matter": 0.0,
+    "alloy": 0.0
+  },
   "player": {
-    "config_file": "tank_configs/player_tank.json",
+    "config_file": "tank_configs/mcv_tank.json",
     "spawn": {
-      "x": 7,
+      "x": 8,
       "y": 14
     },
     "vision_size": 288,
-    "ammo": 25
+    "ammo": 30
   },
   "player_units": [
     {
-      "id": "core_supply_base",
-      "config_file": "tank_configs/tower_supply.json",
-      "spawn": {
-        "x": 9,
-        "y": 14
-      },
-      "vision_size": 320,
-      "ammo": -1
-    },
-    {
-      "id": "radar_tower",
-      "config_file": "tank_configs/tower_radar.json",
-      "spawn": {
-        "x": 2,
-        "y": 12
-      },
-      "vision_size": 560,
-      "ammo": 0
-    },
-    {
-      "id": "cannon_tower",
-      "config_file": "tank_configs/tower_cannon.json",
-      "spawn": {
-        "x": 17,
-        "y": 12
-      },
-      "vision_size": 280,
-      "ammo": 40
-    },
-    {
-      "id": "player_alpha",
-      "config_file": "tank_configs/player_tank.json",
-      "spawn": {
-        "x": 7,
-        "y": 14
-      },
-      "vision_size": 260,
-      "ammo": 20,
-      "visibility": 1.0
-    },
-    {
-      "id": "player_clearing",
-      "config_file": "tank_configs/clearing_tank.json",
+      "id": "player_mcv",
+      "config_file": "tank_configs/mcv_tank.json",
       "spawn": {
         "x": 8,
         "y": 14
       },
-      "vision_size": 260,
+      "vision_size": 288,
       "ammo": 30,
-      "visibility": 1.0
+      "visibility": 1.0,
+      "controllable": true
     },
     {
-      "id": "player_bravo",
-      "config_file": "tank_configs/player_tank.json",
+      "id": "player_radar",
+      "config_file": "tank_configs/tower_radar.json",
       "spawn": {
         "x": 11,
         "y": 14
       },
-      "vision_size": 260,
-      "ammo": 20,
-      "visibility": 0.7,
-      "controllable": false,
-      "ai_script": "ai_python/ally_escort.py"
+      "vision_size": 560,
+      "ammo": 0,
+      "visibility": 1.0,
+      "controllable": false
     }
   ],
   "enemies": [
     {
-      "id": "e_patrol_1",
-      "config_file": "tank_configs/enemy_basic.json",
+      "id": "enemy_mcv",
+      "config_file": "tank_configs/mcv_tank.json",
       "spawn": {
-        "x": 0,
-        "y": 0
+        "x": 8,
+        "y": 1
       },
-      "tactic": "patrol",
-      "vision_size": -1,
-      "ammo": 20,
+      "tactic": "defensive",
+      "vision_size": 288,
+      "ammo": 30,
+      "visibility": 1.0
+    },
+    {
+      "id": "enemy_radar",
+      "config_file": "tank_configs/tower_radar.json",
+      "spawn": {
+        "x": 11,
+        "y": 1
+      },
+      "tactic": "guard",
+      "vision_size": 560,
+      "ammo": 0,
       "visibility": 1.0,
-      "ai_script": "ai_python/patrol_scout.py"
-    },
-    {
-      "id": "e_fast_1",
-      "config_file": "tank_configs/enemy_fast.json",
-      "spawn": {
-        "x": 9,
-        "y": 0
-      },
-      "tactic": "charge_base",
-      "vision_size": -1,
-      "ammo": 15,
-      "visibility": 0.65,
-      "ai_script": "ai_python/charge_assault.py"
-    },
-    {
-      "id": "e_hunter_1",
-      "config_file": "tank_configs/enemy_heavy.json",
-      "spawn": {
-        "x": 19,
-        "y": 0
-      },
-      "tactic": "hunter",
-      "vision_size": -1,
-      "ammo": -1,
-      "visibility": 0.85,
-      "ai_script": "ai_python/boss_hunter.py"
+      "ai_script": "ai_python/commander_intermediate.py"
     }
   ],
   "victory_conditions": {
     "or": [
       {
-        "and": [
-          {
-            "type": "unit_survive_time",
-            "unit_id": "core_supply_base",
-            "seconds": 30.0
-          },
-          {
-            "type": "area_visible",
-            "tile_x": 0,
-            "tile_y": 0,
-            "tile_w": 4,
-            "tile_h": 4
-          }
-        ]
+        "type": "unit_destroyed",
+        "unit_id": "enemy_radar"
       },
       {
-        "and": [
-          {
-            "type": "unit_destroyed",
-            "unit_id": "e_hunter_1"
-          },
-          {
-            "type": "unit_destroyed",
-            "unit_id": "e_fast_1"
-          },
-          {
-            "not": {
-              "type": "unit_destroyed",
-              "unit_id": "player_alpha"
-            }
-          }
-        ]
+        "type": "all_enemies_destroyed"
       }
     ]
   },
@@ -162,7 +88,7 @@
     "or": [
       {
         "type": "unit_destroyed",
-        "unit_id": "core_supply_base"
+        "unit_id": "player_radar"
       },
       {
         "type": "all_players_destroyed"

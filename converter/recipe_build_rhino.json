@@ -1,0 +1,15 @@
+{
+  "id": "recipe_build_rhino",
+  "name": "converter.recipe.build_rhino",
+  "inputs": {
+    "alloy": 8.0,
+    "dark_matter": 4.0
+  },
+  "outputs": "tank",
+  "output_type": "tank",
+  "tank_config": "tank_configs/rhino_tank.json",
+  "visibility": 1.0,
+  "vision_size": 260.0,
+  "ammo": 15,
+  "duration": 2.5
+}

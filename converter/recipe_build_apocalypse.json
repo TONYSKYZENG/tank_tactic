@@ -1,0 +1,15 @@
+{
+  "id": "recipe_build_apocalypse",
+  "name": "converter.recipe.build_apocalypse",
+  "inputs": {
+    "alloy": 25.0,
+    "dark_matter": 18.0
+  },
+  "outputs": "tank",
+  "output_type": "tank",
+  "tank_config": "tank_configs/apocalypse_tank.json",
+  "visibility": 1.2,
+  "vision_size": 280.0,
+  "ammo": 35,
+  "duration": 7.0
+}

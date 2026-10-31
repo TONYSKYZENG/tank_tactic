@@ -5,7 +5,7 @@
   "initial_amount": 300,
   "regen_rate": 1.0,
   "max_amount": 3000,
-  "harvest_radius": 64.0,
-  "exclusive_radius": 96.0,
+  "harvest_radius": 128.0,
+  "exclusive_radius": 130.0,
   "color": "#2980B9"
 }

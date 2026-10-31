@@ -4,6 +4,7 @@ import json
 import threading
 from pathlib import Path
 from map_loader.models import GameMap, TileType
+from map_loader.loader import MapLoader
 from mission_loader.loader import MissionLoader
 from physics.entities import Tank, Camp, Direction, Rect
 from physics.engine import PhysicsEngine
@@ -13,12 +14,14 @@ from command.tactics_mode import TacticMode
 from api.controller import GameAPIController
 from ai_python.bridge import TankScriptAPI
 from ai_python.manager import AIScriptManager
+from resource.models import ResourceManager
 
 class MockGameContext:
     def __init__(self):
         self.game_map = GameMap(name="test_map", cols=20, rows=20, tile_size=32, grid=[[TileType.EMPTY for _ in range(20)] for _ in range(20)])
         self.physics_engine = PhysicsEngine(self.game_map, fog_of_war_enabled=True, limited_ammo_enabled=True)
         self.command_dispatcher = CommandDispatcher()
+        self.resource_manager = ResourceManager()
 
         self.p1 = Tank(x=100, y=100, size=32, speed=3.0, camp=Camp.PLAYER, tank_id="player_1", controllable=True)
         self.p_auto = Tank(x=150, y=100, size=32, speed=3.0, camp=Camp.PLAYER, tank_id="player_bravo", controllable=False, ai_script="ai_python/ally_escort.py")
@@ -220,24 +223,79 @@ class TestMissionConfiguration(unittest.TestCase):
         mission_path = Path("missions/mission_01.json")
         mission = MissionLoader.load_from_file(mission_path)
 
-        # 验证 player_bravo 为不可控友军并配置了战术脚本
-        bravo = next((p for p in mission.player_units if p.id == "player_bravo"), None)
-        self.assertIsNotNone(bravo)
-        self.assertFalse(bravo.controllable)
-        self.assertEqual(bravo.ai_script, "ai_python/ally_escort.py")
+        # 验证双方初始资源为 0
+        self.assertEqual(mission.player_initial_resources, {"dark_matter": 0.0, "alloy": 0.0})
+        self.assertEqual(mission.enemy_initial_resources, {"dark_matter": 0.0, "alloy": 0.0})
 
-        # 验证敌军单位配置了对应战术脚本
-        hunter = next((e for e in mission.enemies if e.id == "e_hunter_1"), None)
-        self.assertIsNotNone(hunter)
-        self.assertEqual(hunter.ai_script, "ai_python/boss_hunter.py")
+        # 验证我方初始单位：一台基地车，一个雷达
+        self.assertEqual(len(mission.player_units), 2)
+        mcv = next((p for p in mission.player_units if p.id == "player_mcv"), None)
+        self.assertIsNotNone(mcv)
+        self.assertTrue(mcv.controllable)
+        self.assertEqual(mcv.config_file, "tank_configs/mcv_tank.json")
 
-        fast = next((e for e in mission.enemies if e.id == "e_fast_1"), None)
-        self.assertIsNotNone(fast)
-        self.assertEqual(fast.ai_script, "ai_python/charge_assault.py")
+        radar = next((p for p in mission.player_units if p.id == "player_radar"), None)
+        self.assertIsNotNone(radar)
+        self.assertFalse(radar.controllable)
+        self.assertEqual(radar.config_file, "tank_configs/tower_radar.json")
 
-        patrol = next((e for e in mission.enemies if e.id == "e_patrol_1"), None)
-        self.assertIsNotNone(patrol)
-        self.assertEqual(patrol.ai_script, "ai_python/patrol_scout.py")
+        # 验证敌方初始单位：一台基地车，一个雷达（加载敌方指挥官 AI 脚本）
+        self.assertEqual(len(mission.enemies), 2)
+        e_mcv = next((e for e in mission.enemies if e.id == "enemy_mcv"), None)
+        self.assertIsNotNone(e_mcv)
+        self.assertEqual(e_mcv.config_file, "tank_configs/mcv_tank.json")
+
+        e_radar = next((e for e in mission.enemies if e.id == "enemy_radar"), None)
+        self.assertIsNotNone(e_radar)
+        self.assertEqual(e_radar.config_file, "tank_configs/tower_radar.json")
+        self.assertEqual(e_radar.ai_script, "ai_python/commander_intermediate.py")
+
+    def test_default_map_specification(self):
+        """测试默认地图 maps/level_01.json 规格：
+        1. 只有中间一道不可推障碍 (STEEL=2)
+        2. 双方两边均有资源块 (DARK_MATTER=3, ALLOY=4)
+        """
+        map_path = Path("maps/level_01.json")
+        gmap = MapLoader.load_from_file(map_path)
+        self.assertEqual(gmap.cols, 20)
+        self.assertEqual(gmap.rows, 16)
+
+        steels = []
+        bricks = []
+        dm_blocks = []
+        alloy_blocks = []
+
+        for r in range(gmap.rows):
+            for c in range(gmap.cols):
+                t = gmap.get_tile(c, r)
+                if t == TileType.STEEL:
+                    steels.append((c, r))
+                elif t == TileType.BRICK:
+                    bricks.append((c, r))
+                elif t == TileType.DARK_MATTER:
+                    dm_blocks.append((c, r))
+                elif t == TileType.ALLOY:
+                    alloy_blocks.append((c, r))
+
+        # 1. 不存在任何可推砖块 (BRICK)
+        self.assertEqual(len(bricks), 0)
+
+        # 2. 只有中间一行/两道不可推障碍 (STEEL)，全部位于中间行 row 7 和 row 8
+        self.assertGreater(len(steels), 0)
+        for (c, r) in steels:
+            self.assertIn(r, (7, 8))
+            self.assertTrue(3 <= c <= 16)
+
+        # 3. 双方半场均有暗物质与合金资源块
+        enemy_dm = [b for b in dm_blocks if b[1] < 7]
+        player_dm = [b for b in dm_blocks if b[1] > 8]
+        enemy_alloy = [b for b in alloy_blocks if b[1] < 7]
+        player_alloy = [b for b in alloy_blocks if b[1] > 8]
+
+        self.assertGreaterEqual(len(enemy_dm), 1)
+        self.assertGreaterEqual(len(player_dm), 1)
+        self.assertGreaterEqual(len(enemy_alloy), 1)
+        self.assertGreaterEqual(len(player_alloy), 1)
 
 
 class TestSmartPathfindingAndBreaching(unittest.TestCase):
@@ -578,6 +636,91 @@ class TestUncontrollableFriendlyUnits(unittest.TestCase):
         self.assertEqual(res_fire["status"], "ok")
         self.assertEqual(res_fire["fired_units"], ["player_bravo"])
         self.assertEqual(len(self.ctx.physics_engine.bullets), bullet_count + 1)
+
+    def test_enemy_commander_scripts_novice_intermediate_ruthless(self):
+        """测试 3 个敌方指挥官脚本：新手、适中、冷酷"""
+        from ai_python.commander_novice import run as run_novice
+        from ai_python.commander_intermediate import run as run_intermediate
+        from ai_python.commander_ruthless import run as run_ruthless
+
+        # 1. 新手指挥官测试
+        tower_novice = Tank(x=500, y=500, size=40, camp=Camp.ENEMY, tank_id="e_tower_novice", is_tower=True, controllable=False)
+        e_soldier = Tank(x=520, y=500, size=32, camp=Camp.ENEMY, tank_id="e_soldier", controllable=False)
+        self.ctx.physics_engine.add_enemy_tank(tower_novice)
+        self.ctx.physics_engine.add_enemy_tank(e_soldier)
+        self.ctx.command_dispatcher.register_tank(tower_novice)
+        self.ctx.command_dispatcher.register_tank(e_soldier)
+
+        # 玩家单位逼近防御塔警戒圈 (距离 ~70 像素)
+        player_infiltrator = Tank(x=550, y=550, size=32, camp=Camp.PLAYER, tank_id="p_infiltrator")
+        self.ctx.physics_engine.add_player_tank(player_infiltrator)
+
+        stop_event = threading.Event()
+        api_novice = TankScriptAPI("e_tower_novice", self.api_controller, stop_event)
+
+        # 运行新手指挥官逻辑一次：让 sleep 设置 stop_event 退出
+        api_novice.sleep = lambda sec: stop_event.set()
+        run_novice(api_novice)
+
+        # 验证新手指挥官命令 e_soldier 攻击侵入者
+        cmd = self.ctx.command_dispatcher.tank_commands.get("e_soldier")
+        self.assertIsNotNone(cmd)
+        self.assertEqual(cmd.target_tank.id, "p_infiltrator")
+
+        # 2. 适中指挥官测试
+        tower_inter = Tank(x=200, y=200, size=40, camp=Camp.ENEMY, tank_id="e_tower_inter", is_tower=True, controllable=False)
+        e_guard = Tank(x=210, y=200, size=32, camp=Camp.ENEMY, tank_id="e_guard", controllable=False)
+        e_attacker = Tank(x=250, y=200, size=32, camp=Camp.ENEMY, tank_id="e_attacker", controllable=False)
+        self.ctx.physics_engine.add_enemy_tank(tower_inter)
+        self.ctx.physics_engine.add_enemy_tank(e_guard)
+        self.ctx.physics_engine.add_enemy_tank(e_attacker)
+        self.ctx.command_dispatcher.register_tank(tower_inter)
+        self.ctx.command_dispatcher.register_tank(e_guard)
+        self.ctx.command_dispatcher.register_tank(e_attacker)
+
+        stop_event_inter = threading.Event()
+        api_inter = TankScriptAPI("e_tower_inter", self.api_controller, stop_event_inter)
+        api_inter.sleep = lambda sec: stop_event_inter.set()
+        run_intermediate(api_inter)
+
+        # 验证近卫单位获得 Guard 指令，突击单位获得 Attack 指令
+        tactic_guard = self.ctx.command_dispatcher.tank_tactics.get("e_guard")
+        self.assertEqual(tactic_guard.value, "guard_unit")
+        cmd_atk = self.ctx.command_dispatcher.tank_commands.get("e_attacker")
+        self.assertIsNotNone(cmd_atk)
+
+        # 3. 冷酷指挥官测试 (暴兵与斩首：基地车造兵不冲锋，仅由战斗单位集火突击)
+        tower_ruthless = Tank(x=300, y=300, size=32, camp=Camp.ENEMY, tank_id="e_tower_ruthless", is_tower=True, controllable=False)
+        mcv_enemy = Tank(x=350, y=300, size=32, camp=Camp.ENEMY, tank_id="e_mcv", controllable=False, can_attack=False,
+                         converter_table=["recipe_build_rhino", "recipe_build_apocalypse"])
+        e_combat = Tank(x=320, y=300, size=32, camp=Camp.ENEMY, tank_id="e_combat", controllable=False, can_attack=True)
+
+        self.ctx.physics_engine.enemy_tanks = [tower_ruthless, mcv_enemy, e_combat]
+        self.ctx.command_dispatcher.register_tank(tower_ruthless)
+        self.ctx.command_dispatcher.register_tank(mcv_enemy)
+        self.ctx.command_dispatcher.register_tank(e_combat)
+
+        # 注入大量敌军资源支持暴兵
+        self.ctx.resource_manager.stockpiles["enemy"]["alloy"] = 100.0
+        self.ctx.resource_manager.stockpiles["enemy"]["dark_matter"] = 100.0
+
+        # 部署带有防御塔属性的玩家关键建筑作为斩首目标
+        player_tower = Tank(x=400, y=400, size=32, camp=Camp.PLAYER, tank_id="p_core_tower", is_tower=True)
+        self.ctx.physics_engine.add_player_tank(player_tower)
+
+        stop_event_ruthless = threading.Event()
+        api_ruthless = TankScriptAPI("e_tower_ruthless", self.api_controller, stop_event_ruthless)
+        api_ruthless.sleep = lambda sec: stop_event_ruthless.set()
+        run_ruthless(api_ruthless)
+
+        # 验证冷酷指挥官在兵力不足时命令基地车生产天启/犀牛坦克
+        self.assertTrue(mcv_enemy.is_converting)
+        # 验证基地车禁止冲锋，未被指派攻击指令
+        self.assertIsNone(self.ctx.command_dispatcher.tank_commands.get("e_mcv"))
+        # 验证仅能攻击的战斗单位冲锋并集火最高优先级的玩家要塞
+        cmd_combat = self.ctx.command_dispatcher.tank_commands.get("e_combat")
+        self.assertIsNotNone(cmd_combat)
+        self.assertEqual(cmd_combat.target_tank.id, "p_core_tower")
 
 
 if __name__ == "__main__":

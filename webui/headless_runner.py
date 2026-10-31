@@ -515,6 +515,14 @@ class HeadlessGameRunner(QObject):
         return bytes(buffer.data())
 
     def _step(self):
+        lock = getattr(getattr(self, "api_controller", None), "lock", None)
+        if lock:
+            with lock:
+                self._step_internal()
+        else:
+            self._step_internal()
+
+    def _step_internal(self):
         if not self.game_over and not self.game_victory and not self.is_paused:
             self.condition_ctx.update(0.016)
 

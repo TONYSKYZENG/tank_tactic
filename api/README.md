@@ -74,6 +74,34 @@ Every request must be a valid JSON object. Both root-level attributes and nested
 
 ---
 
+## 🛡️ Concurrency Safety & Anti-Jitter Architecture
+
+To prevent game stuttering, tank jitter, and race conditions when multiple API clients (WebSocket, TCP, UDP, AI script threads) issue requests simultaneously:
+
+1. **Re-entrant Thread Safety (`RLock`)**:
+   - `GameAPIController.lock` guarantees exclusive atomic execution.
+   - Simulation loops (`game_widget.py`, `headless_runner.py`) acquire this lock each tick, preventing physics/dispatcher race conditions.
+
+2. **Batch Commands & Priority Sorting**:
+   - Accepts batch arrays `[req1, req2, ...]` or `{"action": "batch", "commands": [...]}`.
+   - Automatically sorts requests based on priority:
+     - **0**: Emergency/System controls (`pause`, `resume`, `terminate`)
+     - **10**: Overrides & Stops (`terminate_convert`, `stop_harvest`, `stop`, `guard`, `tactic`)
+     - **20**: Combat actions (`attack`)
+     - **30**: Movement & Pathfinding (`move`, `path`)
+     - **40**: Economy & Production (`convert`, `harvest`)
+     - **50**: Queries & Telemetry (`report`, `resources`, `list_*`)
+   - Within the same priority, commands can specify `"order": int` or `"seq": int`.
+
+3. **Sequence Anti-Jitter Protection (`seq`)**:
+   - Commands can optionally specify `"seq": <integer>`.
+   - If network delay causes an older sequence to arrive after a newer one, the controller safely ignores it (`status: "ignored"`), preventing tanks from jittering back and forth.
+
+4. **Movement Anti-Stutter Damping**:
+   - High-frequency calls to `move` with a target within 4.0 pixels of the current active waypoint will preserve the current smooth A* path without interrupting the tank.
+
+---
+
 ## 📚 API Reference
 
 ### 1. `api.pause()` & `api.resume()`
@@ -742,6 +770,20 @@ The engine provides an autonomous tactical script execution layer in `ai_python/
 - **API Layer Translation**: Scripts interact with the game engine exclusively via `TankScriptAPI` (`ai_python/bridge.py`), which translates Python method invocations (`move`, `attack`, `fire`, `set_guard`, `report`, `get_opponents`, `get_allies`) into standard JSON API requests dispatched to `GameAPIController.handle_request()`.
 - **Omniscient Intelligence**: Tactical scripts are omniscient by default (`god_mode=True`), possessing full situational awareness of all units and terrain without fog-of-war restrictions.
 - **Friendly Controllability**: Friendly units can be designated as non-controllable (`controllable: false`). Non-controllable units are always listed in `list_current_unit_id` and share vision across the entire team (clearing fog-of-war and spotting enemies for all friendly units). External commands targeting them succeed without error (`status: "ok"`), but are not executed on them, ensuring these units autonomously execute their own predetermined AI scripts.
+
+### Autonomous Commander Scripts (`ai_python/commander_*.py`):
+Can be assigned to enemy defensive fortresses or towers to dynamically direct and command friendly battlefield units:
+1. **Novice Commander (`commander_novice.py`)**:
+   - Slow heartbeat (`2.5s`), passive defensive posture.
+   - Dispatches single interceptors only when opponents breach the inner defense perimeter (`< 220px`).
+2. **Intermediate Commander (`commander_intermediate.py`)**:
+   - Balanced heartbeat (`1.0s`).
+   - Delegates dedicated bodyguards to protect the command tower while sending assault groups to focus-fire vulnerable or nearby targets.
+   - Commands idle units to harvest nearby tactical resources.
+3. **Ruthless Commander (`commander_ruthless.py`)**:
+   - High-frequency heartbeat (`0.4s`).
+   - Real-time macro-economic coordination: triggers MCVs to produce heavy Apocalypse or fast Rhino tanks.
+   - Wolfpack tactics: orders full aggressive focus-fire with priority on decapitating player fortresses and base buildings.
 
 ### Example Tactical Python Script (`ai_python/boss_hunter.py`):
 ```python

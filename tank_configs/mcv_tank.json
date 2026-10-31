@@ -1,0 +1,30 @@
+{
+  "name": "Mobile Construction Vehicle",
+  "speed": 1.6,
+  "size": 32,
+  "color": "#27AE60",
+  "track_color": "#1E8449",
+  "bullet_speed": 5.0,
+  "bullet_size": 12,
+  "bullet_color": "#2ECC71",
+  "fire_cooldown": 25,
+  "health": 10,
+  "is_tower": false,
+  "can_attack": false,
+  "can_crush_bricks": true,
+  "crush_speed_factor": 0.65,
+  "converter_table": [
+    "recipe_dm_to_alloy",
+    "recipe_alloy_to_dm",
+    "recipe_hyper_fusion",
+    "recipe_free_energy",
+    "recipe_build_rhino",
+    "recipe_build_apocalypse",
+    "recipe_build_mcv",
+    "recipe_build_tank"
+  ],
+  "harvest_speed": {
+    "dark_matter": 3.0,
+    "alloy": 2.5
+  }
+}

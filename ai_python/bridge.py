@@ -130,38 +130,53 @@ class TankScriptAPI:
 
     # ================= 战术动作命令下发 =================
 
-    def move(self, x: float, y: float) -> Dict[str, Any]:
-        """移动本车到目标世界坐标 (x, y)"""
-        return self._call("command_move", unit_ids=[self.tank_id], x=x, y=y)
+    def move(self, x: float, y: float, unit_ids: Optional[Any] = None) -> Dict[str, Any]:
+        """移动指定单位或本车到目标世界坐标 (x, y)"""
+        uids = unit_ids if unit_ids is not None else [self.tank_id]
+        if isinstance(uids, str):
+            uids = [uids]
+        return self._call("command_move", unit_ids=uids, x=x, y=y)
 
-    def attack(self, target_id: str) -> Dict[str, Any]:
+    def attack(self, target_id: str, unit_ids: Optional[Any] = None) -> Dict[str, Any]:
         """集火攻击目标单位（全知全能视角定位并追击目标）"""
-        return self._call("command_attack", unit_ids=[self.tank_id], target_id=target_id, god_mode=True)
+        uids = unit_ids if unit_ids is not None else [self.tank_id]
+        if isinstance(uids, str):
+            uids = [uids]
+        return self._call("command_attack", unit_ids=uids, target_id=target_id, god_mode=True)
 
-    def fire(self, direction: Optional[str] = None) -> Dict[str, Any]:
+    def fire(self, direction: Optional[str] = None, unit_ids: Optional[Any] = None) -> Dict[str, Any]:
         """
         向指定方向或当前朝向发射炮弹
         :param direction: 可选 'UP', 'DOWN', 'LEFT', 'RIGHT'
         """
-        params = {"unit_ids": [self.tank_id]}
+        uids = unit_ids if unit_ids is not None else [self.tank_id]
+        if isinstance(uids, str):
+            uids = [uids]
+        params = {"unit_ids": uids}
         if direction:
             params["direction"] = direction
         return self._call("command_fire", **params)
 
-    def set_tactic(self, tactic: str, guard_target_id: Optional[str] = None) -> Dict[str, Any]:
+    def set_tactic(self, tactic: str, guard_target_id: Optional[str] = None, unit_ids: Optional[Any] = None) -> Dict[str, Any]:
         """
         设置战术姿态
         :param tactic: 'aggressive', 'defensive', 'guard', 'stop'
         :param guard_target_id: 当 tactic 为 'guard' 时的保护目标 ID
         """
-        params = {"unit_ids": [self.tank_id], "tactic": tactic}
+        uids = unit_ids if unit_ids is not None else [self.tank_id]
+        if isinstance(uids, str):
+            uids = [uids]
+        params = {"unit_ids": uids, "tactic": tactic}
         if guard_target_id:
             params["guard_target_id"] = guard_target_id
         return self._call("command_set_tactic", **params)
 
-    def set_guard(self, target_id: str) -> Dict[str, Any]:
+    def set_guard(self, target_id: str, unit_ids: Optional[Any] = None) -> Dict[str, Any]:
         """贴身保卫并护航目标单位"""
-        return self._call("command_set_guard", unit_ids=[self.tank_id], target_id=target_id)
+        uids = unit_ids if unit_ids is not None else [self.tank_id]
+        if isinstance(uids, str):
+            uids = [uids]
+        return self._call("command_set_guard", unit_ids=uids, target_id=target_id)
 
     # ================= 资源经济与配方转换 =================
 
@@ -243,9 +258,5 @@ class TankScriptAPI:
         import math
         valid_blocks.sort(key=lambda b: math.hypot(b["x"] - my_x, b["y"] - my_y))
         best_block = valid_blocks[0]
-
-        # 若不在采集范围内，先下达移动
-        if not best_block.get("in_range", False):
-            self.move(best_block["x"], best_block["y"])
 
         return self.harvest(best_block["col"], best_block["row"], unit_id=target_uid)

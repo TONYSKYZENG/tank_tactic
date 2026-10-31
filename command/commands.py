@@ -513,23 +513,57 @@ class HarvestCommand(BaseCommand):
     def _find_standable_harvest_pos(self, tank: Tank, physics_engine, game_map: GameMap, block: Any) -> Optional[Tuple[float, float]]:
         ts = game_map.tile_size
         cx, cy = block.center(ts)
-        r = int(math.ceil(block.harvest_radius / ts))
+        S = tank.size
+        bx1, by1 = block.col * ts, block.row * ts
+        bx2, by2 = bx1 + ts, by1 + ts
 
-        candidates = []
+        pts = []
+        # 1. 瓦片网格常规对齐采样 (适用于尺寸适中战车)
+        r = int(math.ceil(block.harvest_radius / ts)) + 1
         for dr in range(-r, r + 1):
             for dc in range(-r, r + 1):
                 col = self.target_col + dc
                 row = self.target_row + dr
                 if 0 <= col < game_map.cols and 0 <= row < game_map.rows:
-                    test_x = col * ts + (ts - tank.size) / 2.0
-                    test_y = row * ts + (ts - tank.size) / 2.0
-                    if physics_engine.can_move_to(tank, test_x, test_y):
-                        tank_cx = test_x + tank.size / 2.0
-                        tank_cy = test_y + tank.size / 2.0
-                        dist = math.hypot(tank_cx - cx, tank_cy - cy)
-                        if dist <= block.harvest_radius:
-                            dist_to_tank = math.hypot(test_x - tank.x, test_y - tank.y)
-                            candidates.append((dist_to_tank, test_x, test_y))
+                    pts.append((col * ts + (ts - S) / 2.0, row * ts + (ts - S) / 2.0))
+                    pts.append((col * ts, row * ts))
+
+        # 2. 贴紧资源块外缘平铺采样 (专为基地车 MCV size 44 > ts 36 等大型战车设计，杜绝因向内溢出碰撞障碍而被判定不可通行)
+        gap = 1.0
+        offsets = [0.0, (ts - S) / 2.0, -(S - ts), ts - S]
+        for offset in offsets:
+            # 目标左侧紧贴
+            pts.append((bx1 - S - gap, by1 + offset))
+            # 目标右侧紧贴
+            pts.append((bx2 + gap, by1 + offset))
+            # 目标上方紧贴
+            pts.append((bx1 + offset, by1 - S - gap))
+            # 目标下方紧贴
+            pts.append((bx1 + offset, by2 + gap))
+
+        # 3. 围绕资源块几何中心的极坐标径向采样
+        min_dist = (ts + S) / 2.0 + 1.0
+        max_dist = block.harvest_radius
+        if min_dist <= max_dist:
+            for dist_r in [min_dist, (min_dist + max_dist) / 2.0, max_dist]:
+                for deg in range(0, 360, 15):
+                    rad = math.radians(deg)
+                    pts.append((cx + math.cos(rad) * dist_r - S / 2.0, cy + math.sin(rad) * dist_r - S / 2.0))
+
+        candidates = []
+        seen = set()
+        for tx, ty in pts:
+            key = (round(tx, 1), round(ty, 1))
+            if key in seen:
+                continue
+            seen.add(key)
+            if 0 <= tx and tx + S <= game_map.pixel_width and 0 <= ty and ty + S <= game_map.pixel_height:
+                if physics_engine.can_move_to(tank, tx, ty):
+                    tcx, tcy = tx + S / 2.0, ty + S / 2.0
+                    dist_center = math.hypot(tcx - cx, tcy - cy)
+                    if dist_center <= block.harvest_radius:
+                        dist_to_tank = math.hypot(tx - tank.x, ty - tank.y)
+                        candidates.append((dist_to_tank, tx, ty))
 
         if candidates:
             candidates.sort(key=lambda item: item[0])
@@ -562,15 +596,28 @@ class HarvestCommand(BaseCommand):
         if self.move_subcmd is None:
             dest = self._find_standable_harvest_pos(tank, physics_engine, game_map, block)
             if dest:
-                self.move_subcmd = MoveCommand(dest[0], dest[1], tolerance=10.0, auto_clear_path=self.auto_clear_path)
+                self.move_subcmd = MoveCommand(dest[0], dest[1], tolerance=6.0, auto_clear_path=self.auto_clear_path)
             else:
                 tank.stop_harvest()
                 return True
 
         if self.move_subcmd:
-            self.move_subcmd.execute(tank, physics_engine, game_map)
+            done = self.move_subcmd.execute(tank, physics_engine, game_map)
             if block.is_in_harvest_range(tank, ts):
                 self.move_subcmd = None
                 tank.start_harvest(self.target_col, self.target_row)
+                return False
+            if done:
+                self.move_subcmd = None
+                if block.is_in_harvest_range(tank, ts):
+                    tank.start_harvest(self.target_col, self.target_row)
+                    return False
+                else:
+                    dest = self._find_standable_harvest_pos(tank, physics_engine, game_map, block)
+                    if dest:
+                        self.move_subcmd = MoveCommand(dest[0], dest[1], tolerance=6.0, auto_clear_path=self.auto_clear_path)
+                    else:
+                        tank.stop_harvest()
+                        return True
 
         return False

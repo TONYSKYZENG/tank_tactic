@@ -19,9 +19,11 @@ This project combines **Age of Empires-style RTS marquee selection and tactical 
   - Powered by clean YAML definitions (`zh.yml`, `en.yml`). Zero restart needed; all buttons, labels, menus, and inspector panels retranslate on the fly.
 - **🔄 360° Free Rotation & Omnidirectional Movement**:
   - Replaces rigid 4-cardinal direction constraints (UP/DOWN/LEFT/RIGHT) with continuous floating-point angular orientation (0°-360°) and smooth directional acceleration, complete with independent hull and turret rotation.
-- **🚜 Clearing Tank & Physical Brick Crushing (`tank_configs/clearing_tank.json`)**:
-  - Heavy engineering tanks equipped with `can_crush_bricks` can directly bulldoze and crush normal red brick obstacles on contact without wasting ammo! Includes physical speed decay during crushing.
-  - Smart A* pathfinding accounts for this capability: clearing tanks treat destructible bricks as traversable routes, optimizing tactical breakthrough paths.
+- **🚜 Armored Roster & Physical Obstacle Crushing (`tank_configs/`)**:
+  - **🦏 Rhino Tank (`rhino_tank.json`)**: Cheap, lightning-fast glass-cannon (speed 4.0, HP 1), capable of harvesting, cannot convert or construct, cheaply mass-produced.
+  - **🏗️ Mobile Construction Vehicle (`mcv_tank.json`)**: Heavy slow-mover (speed 1.6, HP 10), capable of crushing bricks, high-rate harvesting, resource conversion, and full unit assembly lines (constructs Rhinos, Apocalypses, and MCVs).
+  - **⚡ Apocalypse Tank (`apocalypse_tank.json`)**: Heavy main battle tank (speed 2.4, HP 6), heavy twin cannons, brick-crushing and resource conversion capabilities, combat specialist without unit production.
+  - **🚜 Clearing Tank (`clearing_tank.json`)**: Heavy engineering tank equipped with `can_crush_bricks` to directly bulldoze and crush normal red brick obstacles on contact without wasting ammo. Smart A* pathfinding treats bricks as traversable.
 - **📊 Auxiliary Omniscient Read-Only WebUI Monitor (`monitor/`, Always Online)**:
   - **Default bind `0.0.0.0`, default port `8088` (IP and port configurable via CLI)**.
   - **Read-Only**: Zero interactive controls or click events, specifically designed for secondary-screen telemetry, live spectating, and AI monitoring.
@@ -114,6 +116,9 @@ tanks_tactic/
 │   └── server.py                 # Unified server manager (APIServerManager)
 │
 ├── tank_configs/                 # 🛡️ Tank and Fortress JSON Templates
+│   ├── rhino_tank.json           # 🦏 Rhino Tank (Cheap Fast Glass-Cannon)
+│   ├── mcv_tank.json             # 🏗️ Mobile Construction Vehicle (Heavy Factory)
+│   ├── apocalypse_tank.json      # ⚡ Apocalypse Tank (Heavy Breaching Tank)
 │   ├── clearing_tank.json        # 🚜 Clearing tank (crushes normal brick walls)
 │   ├── tower_radar.json          # 🗼 Radar outpost (high vision, unarmed)
 │   ├── tower_cannon.json         # 🗼 Heavy defense cannon tower
@@ -131,6 +136,13 @@ tanks_tactic/
 ├── grouping/                     # 🛡️ Unit grouping and selection management
 ├── command/                      # 📡 Command dispatch and tactical systems
 ├── ai/                           # 🤖 Tactical AI behaviors
+├── ai_python/                    # 🐍 Tactical & Autonomous Commander Python scripts
+│   ├── commander_novice.py       # 🔰 Novice defense commander (passive perimeter defense)
+│   ├── commander_intermediate.py # ⚔️ Intermediate commander (bodyguards + assault groups)
+│   ├── commander_ruthless.py     # 💀 Ruthless commander (macro economy, MCV production, decapitation)
+│   ├── boss_hunter.py            # Heavy hunter script
+│   ├── ally_escort.py            # Friendly escort script
+│   └── bridge.py                 # TankScriptAPI bridge
 ├── gui/                          # 🖥️ Desktop PyQt5 GUI
 ├── webui/                        # 🌐 Web VNC client (port 8080)
 ├── map_loader/                   # 🗺️ Map JSON loader
@@ -251,38 +263,11 @@ Inside `missions/*.json`, the `victory_conditions` and `defeat_conditions` secti
   "victory_conditions": {
     "or": [
       {
-        "and": [
-          {
-            "type": "unit_survive_time",
-            "unit_id": "core_supply_base",
-            "seconds": 30.0
-          },
-          {
-            "type": "area_visible",
-            "tile_x": 0,
-            "tile_y": 0,
-            "tile_w": 4,
-            "tile_h": 4
-          }
-        ]
+        "type": "unit_destroyed",
+        "unit_id": "enemy_radar"
       },
       {
-        "and": [
-          {
-            "type": "unit_destroyed",
-            "unit_id": "e_hunter_1"
-          },
-          {
-            "type": "unit_destroyed",
-            "unit_id": "e_fast_1"
-          },
-          {
-            "not": {
-              "type": "unit_destroyed",
-              "unit_id": "player_alpha"
-            }
-          }
-        ]
+        "type": "all_enemies_destroyed"
       }
     ]
   },
@@ -290,7 +275,7 @@ Inside `missions/*.json`, the `victory_conditions` and `defeat_conditions` secti
     "or": [
       {
         "type": "unit_destroyed",
-        "unit_id": "core_supply_base"
+        "unit_id": "player_radar"
       },
       {
         "type": "all_players_destroyed"

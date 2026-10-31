@@ -185,3 +185,6 @@ converter:
     hyper_fusion: "Hyper Fusion (20 DM + 15 Alloy -> 35 DM + 25 Alloy)"
     free_energy: "Zero-Point Energy Extraction (Free Dark Matter)"
     build_tank: "Assault Tank Production Line (Construct Tank)"
+    build_rhino: "Construct Rhino Tank (8 Alloy + 4 DM, Cheap & Fast Glass-Cannon)"
+    build_mcv: "Assemble Mobile Construction Vehicle (40 Alloy + 30 DM, Heavy Factory)"
+    build_apocalypse: "Construct Apocalypse Tank (25 Alloy + 18 DM, Heavy Breaching Tank)"

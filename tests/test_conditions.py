@@ -181,9 +181,8 @@ class TestConditions(unittest.TestCase):
         v_tree = ConditionBuilder.build(mission.victory_conditions)
         d_tree = ConditionBuilder.build(mission.defeat_conditions)
 
-        self.assertIn("core_supply_base", v_tree.get_description())
-        self.assertIn("e_hunter_1", v_tree.get_description())
-        self.assertIn("core_supply_base", d_tree.get_description())
+        self.assertIn("enemy_radar", v_tree.get_description())
+        self.assertIn("player_radar", d_tree.get_description())
 
 if __name__ == "__main__":
     unittest.main()

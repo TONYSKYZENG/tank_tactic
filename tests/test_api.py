@@ -18,6 +18,8 @@ from command.dispatcher import CommandDispatcher
 from command.tactics_mode import TacticMode
 from conditions.primitives import ConditionContext, UnitSurviveTimeCondition, UnitDestroyedCondition
 from conditions.composite import OrCondition
+from resource.models import ResourceManager
+from command.commands import MoveCommand
 from api.controller import GameAPIController
 from api.server import APIServerManager
 
@@ -27,6 +29,7 @@ class MockGameContext:
         self.physics_engine = PhysicsEngine(self.game_map, fog_of_war_enabled=False, limited_ammo_enabled=True)
         self.command_dispatcher = CommandDispatcher()
         self.condition_ctx = ConditionContext(self.physics_engine, self.game_map)
+        self.resource_manager = ResourceManager()
 
         # 玩家单位
         self.p1 = Tank(x=100, y=100, size=28, speed=3.0, camp=Camp.PLAYER, health=3, tank_id="player_alpha", ammo=20, vision_size=200.0, visibility=1.0)
@@ -542,6 +545,138 @@ class TestGameAPI(unittest.TestCase):
         client.execute_command_line("terminate_convert player_alpha")
         self.assertEqual(sent_payloads[-1]["action"], "api.terminate_convert")
         self.assertEqual(sent_payloads[-1]["unit_id"], "player_alpha")
+
+    def test_concurrency_thread_safety(self):
+        """测试多线程并发 API 请求与主物理/调度循环的安全锁机制"""
+        import threading
+
+        threads = []
+        errors = []
+
+        def worker_task(thread_id: int):
+            for i in range(25):
+                try:
+                    action_choice = i % 5
+                    if action_choice == 0:
+                        req = {"action": "api.move", "unit_ids": "player_alpha", "x": 100 + i, "y": 120 + i}
+                    elif action_choice == 1:
+                        req = {"action": "api.report", "unit_id": "player_alpha"}
+                    elif action_choice == 2:
+                        req = {"action": "api.is_success"}
+                    elif action_choice == 3:
+                        req = {"action": "api.list_current_unit_id"}
+                    else:
+                        req = {"action": "api.get_resources"}
+                    resp_str = self.controller.handle_request(json.dumps(req))
+                    resp = json.loads(resp_str)
+                    if resp.get("status") not in ("ok", "ignored"):
+                        errors.append(f"Thread {thread_id} step {i} status not ok: {resp}")
+                except Exception as ex:
+                    errors.append(f"Thread {thread_id} step {i} exception: {ex}")
+
+        # 启动模拟游戏主循环线程（持有 lock 更新物理与调度器）
+        sim_stop = False
+        def sim_loop():
+            while not sim_stop:
+                with self.controller.lock:
+                    self.mock_game.physics_engine.update()
+                    self.mock_game.command_dispatcher.update(
+                        [self.mock_game.p1], None, False, self.mock_game.physics_engine, self.mock_game.game_map
+                    )
+                time.sleep(0.002)
+
+        sim_thread = threading.Thread(target=sim_loop, daemon=True)
+        sim_thread.start()
+
+        # 启动 8 个并发客户端调用线程
+        for tid in range(8):
+            t = threading.Thread(target=worker_task, args=(tid,))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        sim_stop = True
+        sim_thread.join(timeout=1.0)
+
+        self.assertEqual(errors, [], f"Encountered concurrency errors: {errors}")
+
+    def test_batch_request_sorting(self):
+        """测试批次请求按优先级与 sequence/order 简单排序机制"""
+        # 1. 数组形式批次调用
+        batch_payload = [
+            {"action": "api.report", "unit_id": "player_alpha"}, # 优先级 50
+            {"action": "api.move", "unit_ids": "player_alpha", "x": 120, "y": 120}, # 优先级 30
+            {"action": "api.pause"}, # 优先级 0
+            {"action": "api.attack", "unit_ids": "player_alpha", "target_id": "enemy_boss"} # 优先级 20
+        ]
+        resp_str = self.controller.handle_request(json.dumps(batch_payload))
+        resp = json.loads(resp_str)
+        self.assertIsInstance(resp, list)
+        self.assertEqual(len(resp), 4)
+        # 校验执行顺序是否按照优先级：pause(0) -> attack(20) -> move(30) -> report(50)
+        self.assertTrue(resp[0].get("paused"))
+        self.assertEqual(resp[1].get("command"), "command_attack")
+        self.assertEqual(resp[2].get("command"), "command_move")
+        self.assertIn("report", resp[3])
+
+        # 2. 相同优先级下的 order / seq 排序
+        ordered_batch = [
+            {"action": "api.move", "order": 3, "unit_ids": "player_alpha", "x": 300, "y": 300},
+            {"action": "api.move", "order": 1, "unit_ids": "player_alpha", "x": 100, "y": 100},
+            {"action": "api.move", "order": 2, "unit_ids": "player_alpha", "x": 200, "y": 200}
+        ]
+        resp_ordered = json.loads(self.controller.handle_request(json.dumps(ordered_batch)))
+        self.assertEqual(resp_ordered[0]["destination"]["x"], 100.0)
+        self.assertEqual(resp_ordered[1]["destination"]["x"], 200.0)
+        self.assertEqual(resp_ordered[2]["destination"]["x"], 300.0)
+
+    def test_sequence_anti_jitter_and_stale_command(self):
+        """测试 seq 时序反抖动保护与旧指令丢弃防抽风机制"""
+        # 第一条指令序列号为 10
+        cmd1 = {"action": "api.move", "unit_ids": "player_alpha", "x": 120, "y": 120, "seq": 10}
+        resp1 = json.loads(self.controller.handle_request(json.dumps(cmd1)))
+        self.assertEqual(resp1["status"], "ok")
+
+        # 迟滞到达的旧指令序列号为 6，应当被判定为 stale 并忽略
+        cmd2 = {"action": "api.move", "unit_ids": "player_alpha", "x": 50, "y": 50, "seq": 6}
+        resp2 = json.loads(self.controller.handle_request(json.dumps(cmd2)))
+        self.assertEqual(resp2["status"], "ignored")
+        self.assertIn("Stale command sequence", resp2["reason"])
+
+        # 新序号指令 15 正常接收并执行
+        cmd3 = {"action": "api.move", "unit_ids": "player_alpha", "x": 180, "y": 180, "seq": 15}
+        resp3 = json.loads(self.controller.handle_request(json.dumps(cmd3)))
+        self.assertEqual(resp3["status"], "ok")
+
+    def test_movement_anti_stutter(self):
+        """测试目标坐标极其相近时的移动指令阻尼防抖防抽风"""
+        # 下发初始移动指令
+        cmd1 = {"action": "api.move", "unit_ids": "player_alpha", "x": 250.0, "y": 250.0}
+        resp1 = json.loads(self.controller.handle_request(json.dumps(cmd1)))
+        self.assertEqual(resp1["status"], "ok")
+
+        first_move_cmd = self.mock_game.command_dispatcher.tank_commands.get("player_alpha")
+        self.assertIsInstance(first_move_cmd, MoveCommand)
+
+        # 连续发送几乎相同目的地的移动指令 (误差 < 4 像素)
+        cmd2 = {"action": "api.move", "unit_ids": "player_alpha", "x": 251.0, "y": 251.5}
+        resp2 = json.loads(self.controller.handle_request(json.dumps(cmd2)))
+        self.assertEqual(resp2["status"], "ok")
+
+        second_move_cmd = self.mock_game.command_dispatcher.tank_commands.get("player_alpha")
+        # 验证原来的移动指令对象未被重复创建或打断
+        self.assertIs(first_move_cmd, second_move_cmd)
+
+        # 发送明显不同的新目的地指令
+        cmd3 = {"action": "api.move", "unit_ids": "player_alpha", "x": 400.0, "y": 400.0}
+        resp3 = json.loads(self.controller.handle_request(json.dumps(cmd3)))
+        self.assertEqual(resp3["status"], "ok")
+
+        third_move_cmd = self.mock_game.command_dispatcher.tank_commands.get("player_alpha")
+        self.assertIsNot(first_move_cmd, third_move_cmd)
+        self.assertEqual(third_move_cmd.dest_x, 400.0)
 
 if __name__ == "__main__":
     unittest.main()

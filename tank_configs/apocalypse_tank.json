@@ -1,0 +1,26 @@
+{
+  "name": "Apocalypse Tank",
+  "speed": 2.4,
+  "size": 32,
+  "color": "#8E44AD",
+  "track_color": "#2C3E50",
+  "bullet_speed": 6.5,
+  "bullet_size": 14,
+  "bullet_color": "#9B59B6",
+  "fire_cooldown": 16,
+  "health": 6,
+  "is_tower": false,
+  "can_attack": true,
+  "can_crush_bricks": true,
+  "crush_speed_factor": 0.75,
+  "converter_table": [
+    "recipe_dm_to_alloy",
+    "recipe_alloy_to_dm",
+    "recipe_hyper_fusion",
+    "recipe_free_energy"
+  ],
+  "harvest_speed": {
+    "dark_matter": 2.2,
+    "alloy": 2.0
+  }
+}

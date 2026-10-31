@@ -185,3 +185,6 @@ converter:
     hyper_fusion: "超聚变反应 (20 DM + 15 Alloy -> 35 DM + 25 Alloy)"
     free_energy: "真空零点能萃取 (凭空产出暗物质)"
     build_tank: "突击战车建造流水线 (消耗合金建造战车)"
+    build_rhino: "制造犀牛坦克 (8 合金 + 4 暗物质，廉价高速纸壳)"
+    build_mcv: "组装基地车 (40 合金 + 30 暗物质，重装破障制造核心)"
+    build_apocalypse: "制造天启坦克 (25 合金 + 18 暗物质，重型破障转化双管重坦)"

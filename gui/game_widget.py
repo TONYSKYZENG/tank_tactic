@@ -504,6 +504,14 @@ class GameCanvasWidget(QWidget):
         })
 
     def _game_loop(self):
+        lock = getattr(getattr(self, "api_controller", None), "lock", None)
+        if lock:
+            with lock:
+                self._game_loop_body()
+        else:
+            self._game_loop_body()
+
+    def _game_loop_body(self):
         if not self.game_over and not self.game_victory and not self.is_paused:
             # 推进胜负条件计时上下文 (假设每步按约 16ms 步进)
             self.condition_ctx.update(0.016)
@@ -564,12 +572,12 @@ class GameCanvasWidget(QWidget):
                 is_sel = self.selection_mgr.is_selected(tank)
                 is_micro = self.selection_mgr.is_micro_tank(tank)
                 auto_clr = self.command_dispatcher.is_auto_clear_path(tank)
-                PixelRenderer.draw_tank(painter, tank, is_selected=is_sel, is_micro=is_micro, auto_clear=auto_clr)
+                PixelRenderer.draw_tank(painter, tank, is_selected=is_sel, is_micro=is_micro, auto_clear=auto_clr, tile_size=self.game_map.tile_size)
 
         # 4. 敌军坦克 (只绘制当前可见的！迷雾外敌军绝对不绘制！)
         for enemy in self.physics_engine.enemy_tanks:
             if enemy.alive and self.physics_engine.is_enemy_visible(enemy):
-                PixelRenderer.draw_tank(painter, enemy)
+                PixelRenderer.draw_tank(painter, enemy, tile_size=self.game_map.tile_size)
 
         # 5. 炮弹 (属于玩家的均可见；属于敌军的在视野内才可见)
         sight_rects = self.physics_engine.get_player_sight_rects()

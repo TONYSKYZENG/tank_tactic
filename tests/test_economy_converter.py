@@ -526,6 +526,159 @@ class TestEconomyAndConverter(unittest.TestCase):
         self.assertEqual(resp["status"], "ok")
         self.assertTrue(factory.is_converting)
 
+    def test_new_and_modified_tank_types_balance(self):
+        """测试新增/修改的三类单位平衡性与特性定义：犀牛坦克、基地车、天启坦克"""
+        from tank_configs.config_loader import TankConfig
+        from converter.loader import RecipeRegistry
+
+        # 1. 犀牛坦克：可采集，不可建造其他单位，不可转化，廉价跑得快的报纸壳壳，可被建造
+        cfg_rhino = TankConfig.from_json("tank_configs/rhino_tank.json")
+        self.assertEqual(cfg_rhino.name, "Rhino Tank")
+        self.assertGreaterEqual(cfg_rhino.speed, 3.8)      # 跑得快
+        self.assertEqual(cfg_rhino.health, 1)             # 报纸壳壳
+        self.assertFalse(cfg_rhino.can_crush_bricks)      # 不可破障
+        self.assertEqual(cfg_rhino.converter_table, [])   # 不可转化、不可建造其他单位
+        self.assertIn("dark_matter", cfg_rhino.harvest_speed)  # 可采集
+        self.assertIn("alloy", cfg_rhino.harvest_speed)
+
+        # 检查可被建造配方
+        recipes = RecipeRegistry.load_recipes()
+        self.assertIn("recipe_build_rhino", recipes)
+        r_rhino = recipes["recipe_build_rhino"]
+        self.assertEqual(r_rhino.output_type, "tank")
+        self.assertEqual(r_rhino.tank_config, "tank_configs/rhino_tank.json")
+        self.assertLessEqual(r_rhino.duration, 3.0)       # 建造极快且廉价
+
+        # 2. 基地车：可采集，可建造，可被建造，可转化，可破障，跑得慢
+        cfg_mcv = TankConfig.from_json("tank_configs/mcv_tank.json")
+        self.assertEqual(cfg_mcv.name, "Mobile Construction Vehicle")
+        self.assertLessEqual(cfg_mcv.speed, 1.8)          # 跑得慢
+        self.assertGreaterEqual(cfg_mcv.health, 8)        # 高生命值重型单位
+        self.assertTrue(cfg_mcv.can_crush_bricks)         # 可破障
+        self.assertIn("dark_matter", cfg_mcv.harvest_speed)   # 可采集
+        self.assertIn("alloy", cfg_mcv.harvest_speed)
+        # 可转化：包含资源转换配方
+        self.assertIn("recipe_dm_to_alloy", cfg_mcv.converter_table)
+        self.assertIn("recipe_hyper_fusion", cfg_mcv.converter_table)
+        # 可建造：包含单位生产配方
+        self.assertIn("recipe_build_rhino", cfg_mcv.converter_table)
+        self.assertIn("recipe_build_apocalypse", cfg_mcv.converter_table)
+        self.assertIn("recipe_build_mcv", cfg_mcv.converter_table)
+
+        # 检查可被建造配方
+        self.assertIn("recipe_build_mcv", recipes)
+        r_mcv = recipes["recipe_build_mcv"]
+        self.assertEqual(r_mcv.output_type, "tank")
+        self.assertEqual(r_mcv.tank_config, "tank_configs/mcv_tank.json")
+        self.assertGreaterEqual(r_mcv.duration, 8.0)      # 基地车建造成本与时间高
+
+        # 3. 天启坦克：可采集，不可建造其他单位，可被建造，能破障和转化，速度一般
+        cfg_apoc = TankConfig.from_json("tank_configs/apocalypse_tank.json")
+        self.assertEqual(cfg_apoc.name, "Apocalypse Tank")
+        self.assertTrue(2.0 <= cfg_apoc.speed <= 2.8)     # 速度一般
+        self.assertGreaterEqual(cfg_apoc.health, 5)       # 重装甲
+        self.assertTrue(cfg_apoc.can_crush_bricks)        # 能破障
+        self.assertIn("dark_matter", cfg_apoc.harvest_speed)  # 可采集
+        # 能转化：包含资源转换配方
+        self.assertIn("recipe_dm_to_alloy", cfg_apoc.converter_table)
+        # 不可建造其他单位：严格不包含任何以 recipe_build_ 为前缀的建造配方
+        build_recipes = [r_id for r_id in cfg_apoc.converter_table if "build" in r_id]
+        self.assertEqual(build_recipes, [])
+
+        # 检查可被建造配方
+        self.assertIn("recipe_build_apocalypse", recipes)
+        r_apoc = recipes["recipe_build_apocalypse"]
+        self.assertEqual(r_apoc.output_type, "tank")
+        self.assertEqual(r_apoc.tank_config, "tank_configs/apocalypse_tank.json")
+
+        # 4. 实机生产验证：基地车生产天启坦克和犀牛坦克
+        mcv_tank = Tank(x=100, y=100, size=cfg_mcv.size, camp=Camp.PLAYER, tank_id="mcv_01",
+                        converter_table=cfg_mcv.converter_table)
+        self.physics.add_player_tank(mcv_tank)
+        self.res_mgr.stockpiles["player"]["alloy"] = 100.0
+        self.res_mgr.stockpiles["player"]["dark_matter"] = 100.0
+
+        # 基地车生产犀牛坦克
+        ok, reason = mcv_tank.converter.enqueue(r_rhino, count=1, resource_manager=self.res_mgr)
+        self.assertTrue(ok)
+        spawned = mcv_tank.converter.update(
+            r_rhino.duration, self.res_mgr, camp="player",
+            physics_engine=self.physics, game_map=self.game_map
+        )
+        self.assertEqual(len(spawned), 1)
+        rhino_spawned = spawned[0]
+        self.assertEqual(rhino_spawned.id, "mcv_01/1")
+        self.assertEqual(rhino_spawned.speed, 4.0)
+        self.assertEqual(rhino_spawned.health, 1)
+        self.assertEqual(rhino_spawned.converter_table, [])
+        self.assertFalse(rhino_spawned.can_crush_bricks)
+        self.assertIn(rhino_spawned, self.physics.player_tanks)
+        self.assertFalse(rhino_spawned.rect.collides_with(mcv_tank.rect))
+
+    def test_mcv_harvest_movement_and_collection(self):
+        """测试大型基地车 (MCV, size=44 > tile_size=36) 前往并开采资源块全流程"""
+        from command.dispatcher import CommandDispatcher
+        from tank_configs.config_loader import TankConfig
+        from api.controller import GameAPIController
+        from map_loader.loader import MapLoader
+        from mission_loader.loader import MissionLoader
+
+        m = MissionLoader.load_from_file('missions/mission_01.json')
+        gmap = MapLoader.load_from_file(m.map_file)
+        pe = PhysicsEngine(gmap, fog_of_war_enabled=False)
+        dispatcher = CommandDispatcher()
+        res_mgr = ResourceManager(initial_resources={"dark_matter": 0.0, "alloy": 0.0})
+        res_mgr.init_from_map(gmap)
+
+        mcv_cfg = TankConfig.from_json('tank_configs/mcv_tank.json')
+        mcv = Tank(
+            x=8 * 36, y=14 * 36, size=mcv_cfg.size, speed=mcv_cfg.speed,
+            camp=Camp.PLAYER, tank_id="player_mcv",
+            can_crush_bricks=mcv_cfg.can_crush_bricks,
+            harvest_speed=mcv_cfg.harvest_speed
+        )
+        pe.add_player_tank(mcv)
+        dispatcher.register_tank(mcv)
+
+        # 1. 验证可为大型基地车成功计算站位坐标，不返回 None
+        target_block = res_mgr.get_block_at(3, 12)
+        self.assertIsNotNone(target_block)
+        from command.commands import HarvestCommand
+        harvest_cmd = HarvestCommand(3, 12, res_mgr)
+        stand_pos = harvest_cmd._find_standable_harvest_pos(mcv, pe, gmap, target_block)
+        self.assertIsNotNone(stand_pos)
+        self.assertTrue(pe.can_move_to(mcv, stand_pos[0], stand_pos[1]))
+
+        # 2. 下达采集指令并推进仿真
+        dispatcher.issue_harvest([mcv], 3, 12, res_mgr)
+        for _ in range(160):
+            cmd = dispatcher.tank_commands.get(mcv.id)
+            if cmd:
+                cmd.execute(mcv, pe, gmap)
+            res_mgr.update(0.016)
+            res_mgr.update_harvest([mcv], 0.016, gmap.tile_size)
+
+        # 3. 校验基地车已就位并展开开采
+        self.assertTrue(mcv.is_harvesting)
+        self.assertEqual(mcv.harvest_state, "harvesting")
+        self.assertGreater(res_mgr.get_amount("dark_matter", "player"), 0.0)
+
+        # 4. 校验 API 停止采集
+        class MockGameCtx:
+            def __init__(self, physics, disp, rm, gm):
+                self.physics_engine = physics
+                self.command_dispatcher = disp
+                self.resource_manager = rm
+                self.game_map = gm
+
+        ctx = MockGameCtx(pe, dispatcher, res_mgr, gmap)
+        api = GameAPIController(ctx)
+        import json
+        stop_resp = json.loads(api.handle_request(json.dumps({"action": "api.stop_harvest", "unit_id": "player_mcv"})))
+        self.assertEqual(stop_resp["status"], "ok")
+        self.assertFalse(mcv.is_harvesting)
+        self.assertIsNone(dispatcher.tank_commands.get("player_mcv"))
+
 
 if __name__ == "__main__":
     unittest.main()

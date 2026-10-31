@@ -19,9 +19,11 @@
   - 基于 YAML 配置，切换时无需重启，所有按钮、标签、菜单与提示信息即时动态翻译生效。
 - **🔄 360° 自由旋转与全向机动机动**：
   - 全面打破传统 FC 坦克的固定四方向（上下左右）枷锁，所有单位均支持浮点精度连续角度旋转与任意角度平滑移动，包含车体朝向与炮塔实时指向。
-- **🚜 清障车与物理碾压机制 (`tank_configs/clearing_tank.json`)**：
-  - 具备 `can_crush_bricks` 属性的重型战车（如清障工程车）可直接接触并碾碎普通红砖墙，无需开火消耗弹药！碾压时附带物理速度衰减惩罚。
-  - 寻路算法（A*）智能识别该属性：清障车将普通砖墙视作可行走通路，大幅优化战场破障开路路线。
+- **🚜 清障车与多样化战车矩阵 (`tank_configs/`)**：
+  - **🦏 犀牛坦克 (`rhino_tank.json`)**：廉价跑得快的报纸壳壳（移速 4.0，HP 1），可采集资源，不可转化亦不可建造，可被快速流水线生产。
+  - **🏗️ 基地车 (`mcv_tank.json`)**：跑得慢（移速 1.6）、超高护甲（HP 10），具备物理碾压破障、资源采集、资源转换与全单位建造流水线（可建造犀牛、天启与基地车）。
+  - **⚡ 天启坦克 (`apocalypse_tank.json`)**：中速重型主战坦克（移速 2.4，HP 6），重炮火力，具备物理破障与资源转换能力，专精战斗不可建造其他单位。
+  - **🚜 清障工程车 (`clearing_tank.json`)**：具备 `can_crush_bricks` 属性的重型战车可直接碾碎普通红砖墙，无需开火消耗弹药！碾压时附带物理速度衰减惩罚。寻路算法（A*）智能识别该属性。
 - **📊 辅助只读全知 WebUI 监控器 (`monitor/`，永远在线)**：
   - **默认绑定 `0.0.0.0`，默认端口 `8088`（端口与 IP 均可命令行自由配置）**。
   - **只读不可操控 (Read-Only)**：无任何操控按键或点击交互，专门用于第二屏幕实时遥测、观战或数据监视。
@@ -114,6 +116,9 @@ tanks_tactic/
 │   └── server.py                 # 统一 API 管理中枢 (APIServerManager)
 │
 ├── tank_configs/                 # 🛡️ 战车与防御塔配置 (JSON)
+│   ├── rhino_tank.json           # 🦏 犀牛坦克 (廉价快速纸壳坦克)
+│   ├── mcv_tank.json             # 🏗️ 基地车 (重装破障制造核心)
+│   ├── apocalypse_tank.json      # ⚡ 天启坦克 (重装破障转化重坦)
 │   ├── clearing_tank.json        # 🚜 清障战车 (物理碾压普通砖块)
 │   ├── tower_radar.json          # 🗼 纯视野雷达哨所
 │   ├── tower_cannon.json         # 🗼 重型加农防御炮台
@@ -131,6 +136,13 @@ tanks_tactic/
 ├── grouping/                     # 🛡️ 编组与选择管理模块 (单选/框选/Tab微操切换)
 ├── command/                      # 📡 指挥调度与战术系统 (GuardUnit 护卫/自动开路)
 ├── ai/                           # 🤖 敌军战术行为模块
+├── ai_python/                    # 🐍 独立战术与动态指挥官 Python 脚本
+│   ├── commander_novice.py       # 🔰 新手防御指挥官脚本 (被动拦截、低频心跳)
+│   ├── commander_intermediate.py # ⚔️ 适中攻防指挥官脚本 (近卫+突击梯队、资源开采)
+│   ├── commander_ruthless.py     # 💀 冷酷狼群指挥官脚本 (宏观经济暴兵、斩首玩家要塞)
+│   ├── boss_hunter.py            # 重装猎杀者脚本
+│   ├── ally_escort.py            # 友军自主护航脚本
+│   └── bridge.py                 # TankScriptAPI 桥接层
 ├── gui/                          # 🖥️ 本地 PyQt5 桌面视窗界面
 ├── webui/                        # 🌐 可操控 Web VNC 模块 (端口 8080)
 ├── map_loader/                   # 🗺️ 地图加载模块
@@ -251,38 +263,11 @@ tanks-editor
   "victory_conditions": {
     "or": [
       {
-        "and": [
-          {
-            "type": "unit_survive_time",
-            "unit_id": "core_supply_base",
-            "seconds": 30.0
-          },
-          {
-            "type": "area_visible",
-            "tile_x": 0,
-            "tile_y": 0,
-            "tile_w": 4,
-            "tile_h": 4
-          }
-        ]
+        "type": "unit_destroyed",
+        "unit_id": "enemy_radar"
       },
       {
-        "and": [
-          {
-            "type": "unit_destroyed",
-            "unit_id": "e_hunter_1"
-          },
-          {
-            "type": "unit_destroyed",
-            "unit_id": "e_fast_1"
-          },
-          {
-            "not": {
-              "type": "unit_destroyed",
-              "unit_id": "player_alpha"
-            }
-          }
-        ]
+        "type": "all_enemies_destroyed"
       }
     ]
   },
@@ -290,7 +275,7 @@ tanks-editor
     "or": [
       {
         "type": "unit_destroyed",
-        "unit_id": "core_supply_base"
+        "unit_id": "player_radar"
       },
       {
         "type": "all_players_destroyed"

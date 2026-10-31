@@ -1,8 +1,11 @@
 import json
+import time
+import math
 import random
 import logging
+import threading
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional, Callable, Tuple
 from command.tactics_mode import TacticMode
 
 logger = logging.getLogger("GameAPI")
@@ -11,7 +14,87 @@ class GameAPIController:
     """
     网络 API 核心控制器：
     负责解析外部 JSON 协议，调用物理引擎、编组与战术调度器执行控制与查询。
+    内置统一 RLock 并发安全保护与指令优先序/时序防抽风机制。
     """
+
+    # 简单指令优先级映射表（数值越小优先级越高）
+    ACTION_PRIORITIES: Dict[str, int] = {
+        # 优先级 0：系统与紧急终结控制（最高）
+        "terminate": 0,
+        "pause": 0,
+        "resume": 0,
+        "restart": 0,
+        "reset": 0,
+        # 优先级 10：战术覆写与紧急停转
+        "terminate_convert": 10,
+        "cancel_convert": 10,
+        "clear_convert": 10,
+        "stop_harvest": 10,
+        "command_stop_harvest": 10,
+        "cancel_harvest": 10,
+        "command_stop": 10,
+        "stop": 10,
+        "command_fire": 12,
+        "fire": 12,
+        "command_set_guard": 15,
+        "set_guard": 15,
+        "guard": 15,
+        "command_set_tactic": 15,
+        "set_tactic": 15,
+        "tactic": 15,
+        # 优先级 20：目标交战与攻击
+        "command_attack": 20,
+        "attack": 20,
+        # 优先级 30：战术机动与寻路
+        "command_move": 30,
+        "move": 30,
+        "find_path": 30,
+        "path": 30,
+        # 优先级 40：生产与开采
+        "convert": 40,
+        "start_convert": 40,
+        "harvest": 40,
+        "command_harvest": 40,
+        "start_harvest": 40,
+        # 优先级 50：情报查询与遥测（只读不影响战术状态）
+        "report": 50,
+        "unit_report": 50,
+        "get_status": 50,
+        "report_enemy": 50,
+        "enemy_report": 50,
+        "get_resources": 50,
+        "resources": 50,
+        "list_resources": 50,
+        "list_current_unit_id": 50,
+        "units": 50,
+        "list_enemy_curr": 50,
+        "list_enemy": 50,
+        "list_enemy_mem": 50,
+        "enemy_mem": 50,
+        "list_opponents": 50,
+        "opponents": 50,
+        "list_allies": 50,
+        "allies": 50,
+        "list_resource_blocks": 50,
+        "get_resource_blocks": 50,
+        "resource_blocks": 50,
+        "list_converter": 50,
+        "list_converters": 50,
+        "list_recipes": 50,
+        "show_converter": 50,
+        "get_converter": 50,
+        "show_recipe": 50,
+        "get_recipe": 50,
+        "is_success": 50,
+        "is_victory": 50,
+        "success": 50,
+        "is_paused": 50,
+        "paused": 50,
+        "ping": 50,
+        "hello": 50,
+        "discovery": 50,
+        "whoami": 50
+    }
 
     def __init__(self, game_context, termination_handler: Optional[Callable] = None):
         """
@@ -24,8 +107,130 @@ class GameAPIController:
         self.termination_handler = termination_handler
         self.pending_actions: List[Callable[[], None]] = []
 
+        # 统一并发安全递归锁 (RLock)
+        self.lock = threading.RLock()
+
+        # 单位最近下发指令记录表（用于时序防抽风判定）：{unit_id: {"seq": int, "action": str, "time": float}}
+        self._unit_last_command: Dict[str, Dict[str, Any]] = {}
+
+    def _get_request_priority(self, req: Dict[str, Any]) -> int:
+        """获取请求优先级数值，数值越小越优先"""
+        if "priority" in req:
+            try:
+                return int(req["priority"])
+            except (ValueError, TypeError):
+                pass
+        params = req.get("params")
+        if isinstance(params, dict) and "priority" in params:
+            try:
+                return int(params["priority"])
+            except (ValueError, TypeError):
+                pass
+
+        action = req.get("action") or req.get("method") or req.get("cmd") or ""
+        action = str(action).strip().lower()
+        if action.startswith("api."):
+            action = action[4:]
+
+        return self.ACTION_PRIORITIES.get(action, 35)
+
+    def _sort_requests(self, requests: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        对并发或批次提交的多个 API 请求进行简单排序：
+        1. 按照指令优先级 (priority: 0 紧急系统 > 10 战术防守/急停 > 20 交战攻击 > 30 机动 > 40 生产/采集 > 50 查询)
+        2. 按照显式序号 (order / seq)
+        3. 按照到达时间戳 (timestamp)
+        4. 保持原始输入稳定次序 (idx)
+        """
+        def sort_key(entry):
+            idx, req = entry
+            if not isinstance(req, dict):
+                return (999, 0, 0.0, idx)
+            prio = self._get_request_priority(req)
+            order = req.get("order")
+            if order is None:
+                order = req.get("seq", 0)
+            try:
+                order_num = int(order)
+            except (ValueError, TypeError):
+                order_num = 0
+            ts = float(req.get("timestamp", 0.0))
+            return (prio, order_num, ts, idx)
+
+        indexed = list(enumerate(requests))
+        indexed.sort(key=sort_key)
+        return [item for _, item in indexed]
+
+    def _check_stale_command(self, action: str, params: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        时序防抽风机制：
+        若指令显式携带 seq / sequence，当检测到为过时的旧序列指令时予以安全丢弃，
+        防止多线程网络延迟抖动导致的“旧指令后发先至覆盖新指令”让战车在地图上原地抽搐抽风。
+        """
+        seq = params.get("seq") or params.get("sequence")
+        if seq is None:
+            return False, ""
+
+        try:
+            seq_num = int(seq)
+        except (ValueError, TypeError):
+            return False, ""
+
+        unit_ids = params.get("unit_ids") or params.get("unit_id")
+        if not unit_ids:
+            return False, ""
+
+        if isinstance(unit_ids, str):
+            u_list = [u.strip() for u in unit_ids.split(",") if u.strip()]
+        elif isinstance(unit_ids, (list, tuple)):
+            u_list = [str(u).strip() for u in unit_ids if str(u).strip()]
+        else:
+            u_list = [str(unit_ids).strip()]
+
+        for uid in u_list:
+            last = self._unit_last_command.get(uid)
+            if last and "seq" in last:
+                if seq_num < last["seq"]:
+                    return True, f"Stale command sequence ({seq_num} < {last['seq']}) for unit '{uid}'"
+
+        return False, ""
+
+    def _record_executed_command(self, action: str, params: Dict[str, Any]) -> None:
+        """记录已生效指令的元数据"""
+        seq = params.get("seq") or params.get("sequence")
+        seq_num = None
+        if seq is not None:
+            try:
+                seq_num = int(seq)
+            except (ValueError, TypeError):
+                pass
+
+        unit_ids = params.get("unit_ids") or params.get("unit_id")
+        if not unit_ids:
+            return
+
+        if isinstance(unit_ids, str):
+            u_list = [u.strip() for u in unit_ids.split(",") if u.strip()]
+        elif isinstance(unit_ids, (list, tuple)):
+            u_list = [str(u).strip() for u in unit_ids if str(u).strip()]
+        else:
+            u_list = [str(unit_ids).strip()]
+
+        now_t = time.time()
+        for uid in u_list:
+            meta = {
+                "action": action,
+                "time": now_t
+            }
+            if seq_num is not None:
+                meta["seq"] = seq_num
+            self._unit_last_command[uid] = meta
+
     def handle_request(self, raw_data: str) -> str:
-        """接收纯文本 JSON 请求并返回纯文本 JSON 响应"""
+        """
+        接收纯文本 JSON 请求（支持单个请求对象、批次请求列表，或带有 batch 动作的指令包），
+        在并发安全锁保护下执行简单排序机制并返回处理结果。
+        """
         if not raw_data or not raw_data.strip():
             return json.dumps({"status": "error", "error": "Empty request"}, ensure_ascii=False)
 
@@ -34,28 +239,98 @@ class GameAPIController:
         except Exception as e:
             return json.dumps({"status": "error", "error": f"Invalid JSON format: {str(e)}"}, ensure_ascii=False)
 
-        if not isinstance(payload, dict):
-            return json.dumps({"status": "error", "error": "Request payload must be a JSON object"}, ensure_ascii=False)
+        with self.lock:
+            # 1. 数组形式的批次请求：如 [{"action": "move", ...}, {"action": "attack", ...}]
+            if isinstance(payload, list):
+                return self._handle_batch_list(payload)
 
-        # 提取操作指令 (兼容 action, method, cmd 等字段)
+            if not isinstance(payload, dict):
+                return json.dumps({"status": "error", "error": "Request payload must be a JSON object or array"}, ensure_ascii=False)
+
+            # 2. 带有 batch 聚合动作的请求
+            action = payload.get("action") or payload.get("method") or payload.get("cmd") or ""
+            action = str(action).strip().lower()
+            if action.startswith("api."):
+                action = action[4:]
+
+            if action in ("batch", "batch_commands", "multi"):
+                commands = payload.get("commands") or payload.get("batch") or []
+                if isinstance(commands, list):
+                    return self._handle_batch_dict(commands, req_id=payload.get("id"))
+
+            # 3. 单个常规指令处理
+            return self._handle_single_request(payload)
+
+    def _handle_batch_list(self, payloads: List[Any]) -> str:
+        """
+        并发安全执行批次请求列表：
+        按优先级与次序进行简单排序后执行
+        """
+        valid_items = [p for p in payloads if isinstance(p, dict)]
+        sorted_items = self._sort_requests(valid_items)
+        results = []
+        for item in sorted_items:
+            res_str = self._handle_single_request(item)
+            try:
+                results.append(json.loads(res_str))
+            except Exception:
+                results.append({"status": "error", "error": "Failed to parse sub-result"})
+
+        return json.dumps(results, ensure_ascii=False)
+
+    def _handle_batch_dict(self, commands: List[Any], req_id: Any = None) -> str:
+        """
+        处理 {"action": "batch", "commands": [...]} 形式的批次请求
+        """
+        valid_cmds = [c for c in commands if isinstance(c, dict)]
+        sorted_cmds = self._sort_requests(valid_cmds)
+        executed_results = []
+        for cmd in sorted_cmds:
+            res_str = self._handle_single_request(cmd)
+            try:
+                executed_results.append(json.loads(res_str))
+            except Exception:
+                executed_results.append({"status": "error", "error": "Execution error"})
+
+        resp = {
+            "status": "ok",
+            "batch_count": len(executed_results),
+            "results": executed_results
+        }
+        if req_id is not None:
+            resp["id"] = req_id
+        return json.dumps(resp, ensure_ascii=False)
+
+    def _handle_single_request(self, payload: Dict[str, Any]) -> str:
+        """执行单个具体 API 指令"""
         action = payload.get("action") or payload.get("method") or payload.get("cmd") or ""
         action = str(action).strip().lower()
-
-        # 规范化：去除 "api." 前缀
         if action.startswith("api."):
             action = action[4:]
 
         params = payload.get("params")
         if not isinstance(params, dict):
-            # 若未提供 params 对象，将顶层 payload 本身作为参数字典
             params = payload
 
         req_id = payload.get("id")
+
+        # 检查指令序列号与时序反抖动保护 (防抽风机制)
+        stale, reason = self._check_stale_command(action, params)
+        if stale:
+            ignored_resp = {
+                "status": "ignored",
+                "reason": reason,
+                "action": action
+            }
+            if req_id is not None:
+                ignored_resp["id"] = req_id
+            return json.dumps(ignored_resp, ensure_ascii=False)
 
         try:
             result = self._dispatch_action(action, params)
             if req_id is not None:
                 result["id"] = req_id
+            self._record_executed_command(action, params)
             return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             logger.exception("Error executing API action: %s", action)
@@ -427,8 +702,17 @@ class GameAPIController:
             return True
 
         caller_id = params.get("_caller_unit_id") or params.get("caller") or params.get("sender")
-        if caller_id and str(caller_id).strip() == str(tank.id).strip():
-            return True
+        if caller_id:
+            caller_str = str(caller_id).strip()
+            if caller_str == str(tank.id).strip():
+                return True
+            # 同阵营指挥官/友军控制权放行
+            physics = getattr(self.game_context, "physics_engine", None)
+            if physics:
+                all_tanks = physics.player_tanks + physics.enemy_tanks
+                caller_tank = next((t for t in all_tanks if t.id == caller_str and t.alive), None)
+                if caller_tank and caller_tank.camp == tank.camp:
+                    return True
 
         return False
 
@@ -450,7 +734,17 @@ class GameAPIController:
 
         executable_tanks = [t for t in tanks if self._can_execute_command(t, params)]
         if executable_tanks:
-            dispatcher.issue_move(executable_tanks, x, y)
+            # 防抽风阻尼：若单位已在向几乎同一目的地移动（误差 < 4 像素），保持当前平滑行军路线，避免重复打断寻路引发抽搐
+            from command.commands import MoveCommand
+            need_move = []
+            for t in executable_tanks:
+                cmd = dispatcher.tank_commands.get(t.id)
+                if isinstance(cmd, MoveCommand) and math.hypot(cmd.dest_x - x, cmd.dest_y - y) < 4.0:
+                    continue
+                need_move.append(t)
+
+            if need_move:
+                dispatcher.issue_move(need_move, x, y)
 
         is_p = bool(getattr(self.game_context, "is_paused", False))
         res = {
@@ -734,6 +1028,7 @@ class GameAPIController:
             "visibility": getattr(target_tank, "visibility", 1.0),
             "vision_size": target_tank.vision_size,
             "is_tower": target_tank.is_tower,
+            "can_attack": getattr(target_tank, "can_attack", True),
             "tower_type": target_tank.tower_type,
             "resupply_radius": target_tank.resupply_radius,
             "can_crush_bricks": getattr(target_tank, "can_crush_bricks", False),
@@ -785,8 +1080,12 @@ class GameAPIController:
                     "max_hp": t.max_health,
                     "unit_type": getattr(t, "unit_type", "tank"),
                     "is_tower": getattr(t, "is_tower", False),
+                    "can_attack": getattr(t, "can_attack", True),
                     "tower_type": getattr(t, "tower_type", "general"),
-                    "speed": t.speed
+                    "speed": t.speed,
+                    "converter_table": list(getattr(t, "converter_table", [])),
+                    "is_converting": getattr(t, "is_converting", False),
+                    "is_harvesting": getattr(t, "is_harvesting", False)
                 })
 
         return {
@@ -827,8 +1126,12 @@ class GameAPIController:
                     "max_hp": t.max_health,
                     "unit_type": getattr(t, "unit_type", "tank"),
                     "is_tower": getattr(t, "is_tower", False),
+                    "can_attack": getattr(t, "can_attack", True),
                     "tower_type": getattr(t, "tower_type", "general"),
-                    "speed": t.speed
+                    "speed": t.speed,
+                    "converter_table": list(getattr(t, "converter_table", [])),
+                    "is_converting": getattr(t, "is_converting", False),
+                    "is_harvesting": getattr(t, "is_harvesting", False)
                 })
 
         return {
@@ -1105,6 +1408,10 @@ class GameAPIController:
 
         target_tank.start_harvest(col, row)
 
+        dispatcher = getattr(self.game_context, "command_dispatcher", None)
+        if dispatcher:
+            dispatcher.issue_harvest([target_tank], col, row, res_mgr)
+
         return {
             "status": "ok",
             "unit_id": unit_id,
@@ -1120,16 +1427,25 @@ class GameAPIController:
         if not physics:
             return {"status": "error", "error": "Physics engine not available"}
 
+        dispatcher = getattr(self.game_context, "command_dispatcher", None)
         unit_id = params.get("unit_id") or params.get("_caller_unit_id")
         if unit_id:
             for t in physics.player_tanks + physics.enemy_tanks:
                 if t.id == unit_id:
                     t.stop_harvest()
+                    if dispatcher and t.id in dispatcher.tank_commands:
+                        from command.commands import HarvestCommand
+                        if isinstance(dispatcher.tank_commands[t.id], HarvestCommand):
+                            dispatcher.tank_commands[t.id] = None
                     return {"status": "ok", "message": f"Harvest stopped for unit '{unit_id}'"}
             return {"status": "error", "error": f"Unit '{unit_id}' not found"}
         else:
             for t in physics.player_tanks + physics.enemy_tanks:
                 t.stop_harvest()
+                if dispatcher and t.id in dispatcher.tank_commands:
+                    from command.commands import HarvestCommand
+                    if isinstance(dispatcher.tank_commands[t.id], HarvestCommand):
+                        dispatcher.tank_commands[t.id] = None
             return {"status": "ok", "message": "Harvest stopped for all units"}
 
     def list_resource_blocks(self, params: Dict[str, Any]) -> Dict[str, Any]:

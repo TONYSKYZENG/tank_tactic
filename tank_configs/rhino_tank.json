@@ -1,0 +1,21 @@
+{
+  "name": "Rhino Tank",
+  "speed": 4.0,
+  "size": 32,
+  "color": "#C0392B",
+  "track_color": "#2C3E50",
+  "bullet_speed": 7.0,
+  "bullet_size": 10,
+  "bullet_color": "#F1C40F",
+  "fire_cooldown": 14,
+  "health": 1,
+  "is_tower": false,
+  "can_attack": true,
+  "can_crush_bricks": false,
+  "crush_speed_factor": 0.5,
+  "converter_table": [],
+  "harvest_speed": {
+    "dark_matter": 2.0,
+    "alloy": 1.5
+  }
+}

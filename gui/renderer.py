@@ -122,7 +122,8 @@ class PixelRenderer:
 
     @staticmethod
     def draw_tank(painter: QPainter, tank: Tank, is_selected: bool = False,
-                  is_micro: bool = False, auto_clear: bool = False) -> None:
+                  is_micro: bool = False, auto_clear: bool = False,
+                  tile_size: float = 36.0) -> None:
         """
         绘制机动坦克或防御塔（雷达塔、重炮塔、补给要塞）
         """
@@ -208,7 +209,7 @@ class PixelRenderer:
             # 绘制开采牵引光束到目标资源块
             if h_state == "harvesting" and getattr(tank, "harvest_target", None):
                 target = tank.harvest_target
-                ts = 32.0
+                ts = float(tile_size)
                 bx = (target[0] + 0.5) * ts
                 by = (target[1] + 0.5) * ts
                 tcx = x + size / 2.0

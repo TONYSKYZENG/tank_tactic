@@ -14,6 +14,9 @@
     "recipe_alloy_to_dm",
     "recipe_hyper_fusion",
     "recipe_free_energy",
+    "recipe_build_rhino",
+    "recipe_build_mcv",
+    "recipe_build_apocalypse",
     "recipe_build_tank"
   ]
 }

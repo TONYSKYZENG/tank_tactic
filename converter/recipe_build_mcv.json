@@ -1,0 +1,15 @@
+{
+  "id": "recipe_build_mcv",
+  "name": "converter.recipe.build_mcv",
+  "inputs": {
+    "alloy": 40.0,
+    "dark_matter": 30.0
+  },
+  "outputs": "tank",
+  "output_type": "tank",
+  "tank_config": "tank_configs/mcv_tank.json",
+  "visibility": 1.5,
+  "vision_size": 340.0,
+  "ammo": -1,
+  "duration": 10.0
+}

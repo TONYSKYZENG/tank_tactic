@@ -1,6 +1,6 @@
 {
   "name": "Apocalypse Tank",
-  "speed": 2.4,
+  "speed": 1.0,
   "size": 32,
   "color": "#8E44AD",
   "track_color": "#2C3E50",

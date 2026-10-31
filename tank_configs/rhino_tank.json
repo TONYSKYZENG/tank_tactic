@@ -1,6 +1,6 @@
 {
   "name": "Rhino Tank",
-  "speed": 4.0,
+  "speed": 1.2,
   "size": 32,
   "color": "#C0392B",
   "track_color": "#2C3E50",

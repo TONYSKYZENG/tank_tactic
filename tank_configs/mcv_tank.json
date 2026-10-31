@@ -1,6 +1,6 @@
 {
   "name": "Mobile Construction Vehicle",
-  "speed": 1.6,
+  "speed": 0.6,
   "size": 32,
   "color": "#27AE60",
   "track_color": "#1E8449",

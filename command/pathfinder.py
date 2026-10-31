@@ -24,7 +24,8 @@ class GridPathfinder:
     def find_path(self, start_x: float, start_y: float,
                   dest_x: float, dest_y: float,
                   tank: Optional[Tank] = None,
-                  limited_ammo_enabled: bool = True) -> Tuple[List[Tuple[float, float]], int]:
+                  limited_ammo_enabled: bool = True,
+                  avoid_tiles: Optional[Set[Tuple[int, int]]] = None) -> Tuple[List[Tuple[float, float]], int]:
         """
         计算最优通行路径与需摧毁的障碍数
         :return: (waypoint_list, ammo_needed)
@@ -108,6 +109,11 @@ class GridPathfinder:
 
                 step_cost = 1.0
                 step_ammo = 0
+
+                # 避开冲突单位所在的格子（赋予极高绕行代价，若存在空闲通道则优先绕道）
+                if avoid_tiles and (nc, nr) in avoid_tiles:
+                    if nc != goal_c or nr != goal_r:
+                        step_cost += 60.0
 
                 if tile == TileType.BRICK:
                     step_ammo = 1

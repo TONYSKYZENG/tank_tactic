@@ -72,12 +72,14 @@ class CommandDispatcher:
                 clear_path = self.is_auto_clear_path(tank)
                 curr_cmd = self.tank_commands.get(tank.id)
                 # 若已在追击该相同存活目标，保持现有寻路与行军子命令，避免高频打断抽搐
+                # 若当前攻击指令严重受阻卡死 (>30 帧)，则允许刷新重设
                 if isinstance(curr_cmd, AttackTargetCommand) and curr_cmd.target_tank == target_tank and target_tank.alive:
-                    continue
+                    if getattr(curr_cmd, "stuck_attack_frames", 0) < 30:
+                        continue
                 self.tank_commands[tank.id] = AttackTargetCommand(target_tank, auto_clear_path=clear_path)
 
-    def _auto_acquire_next_target(self, tank: Tank, physics_engine) -> None:
-        """当当前目标被歼灭后，自动为战斗/战术单位接续锁定下一个高威胁目标，确保连续作战不发呆"""
+    def _auto_acquire_next_target(self, tank: Tank, physics_engine, exclude_target: Optional[Tank] = None) -> None:
+        """当当前目标被歼灭或路径受阻卡死时，自动为战斗/战术单位接续锁定下一个高威胁目标，确保连续作战不发呆"""
         if not tank.alive or tank.is_tower:
             return
 
@@ -87,7 +89,9 @@ class CommandDispatcher:
 
         if tank.camp == Camp.ENEMY or has_script:
             opp_list = physics_engine.player_tanks if tank.camp == Camp.ENEMY else physics_engine.enemy_tanks
-            alive_opps = [t for t in opp_list if t.alive]
+            alive_opps = [t for t in opp_list if t.alive and (exclude_target is None or t != exclude_target)]
+            if not alive_opps and exclude_target is not None and exclude_target.alive:
+                alive_opps = [exclude_target]
             if alive_opps:
                 best_target = min(
                     alive_opps,
@@ -95,7 +99,9 @@ class CommandDispatcher:
                 )
                 self.tank_commands[tank.id] = AttackTargetCommand(best_target, auto_clear_path=clear_path)
         elif tactic == TacticMode.AGGRESSIVE:
-            visible_enemies = physics_engine.get_visible_enemies()
+            visible_enemies = [e for e in physics_engine.get_visible_enemies() if (exclude_target is None or e != exclude_target)]
+            if not visible_enemies and exclude_target is not None and exclude_target.alive and physics_engine.is_enemy_visible(exclude_target):
+                visible_enemies = [exclude_target]
             if visible_enemies:
                 nearest_enemy = min(
                     visible_enemies,
@@ -184,8 +190,10 @@ class CommandDispatcher:
                     finished = cmd.execute(tank, physics_engine, game_map)
                     if finished:
                         self.tank_commands[tank.id] = None
+                        target = getattr(cmd, "target_tank", None)
+                        exclude = target if (target and target.alive) else None
                         cmd = None
-                        self._auto_acquire_next_target(tank, physics_engine)
+                        self._auto_acquire_next_target(tank, physics_engine, exclude_target=exclude)
                     continue
 
             tactic = self.tank_tactics.get(tank.id, TacticMode.MANUAL_OR_IDLE)

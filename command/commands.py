@@ -42,6 +42,7 @@ class MoveCommand(BaseCommand):
     智能 A* 移动到目标点命令：
     - 当无限弹药时：自动破障，以极小时间开销直接炸开砖墙，直达目标；
     - 当有限弹药时：自动计算最省弹药的破障办法，优先零耗弹绕过障碍；若必须破障，选择摧毁砖块数绝对最少的路线。
+    - 动态避碰与死锁防卡死机制：遇其他单位阻挡时自动侧向回避、A* 绕行或主动让行，杜绝碰撞死锁。
     """
     def __init__(self, dest_x: float, dest_y: float, tolerance: float = 8.0,
                  auto_clear_path: bool = True):
@@ -52,9 +53,13 @@ class MoveCommand(BaseCommand):
         self.path: Optional[List[Tuple[float, float]]] = None
         self.path_idx: int = 0
         self.stuck_frames: int = 0
+        self.total_stuck_frames: int = 0
         self.replan_timer: int = 0
         self.ammo_needed: int = 0
         self.pathfinder: Optional[GridPathfinder] = None
+        self.blocking_tank_id: Optional[str] = None
+        self.yield_timer: int = 0
+        self.yield_direction: Optional[Direction] = None
 
     def _check_front_has_brick(self, tank: Tank, direction: Direction,
                                game_map: GameMap) -> bool:
@@ -89,20 +94,44 @@ class MoveCommand(BaseCommand):
         if self.pathfinder is None or self.pathfinder.game_map != game_map:
             self.pathfinder = GridPathfinder(game_map)
 
+        tile_size = game_map.tile_size
+
+        # 让行倒车缓冲期：当两辆友军对撞死锁时，低优先级战车后退让道
+        if self.yield_timer > 0:
+            self.yield_timer -= 1
+            if self.yield_direction:
+                physics_engine.move_tank(tank, self.yield_direction)
+            return False
+
         # 路径规划与自适应周期重规划
         if self.path is None or self.replan_timer <= 0:
+            avoid_tiles = set()
+            if self.blocking_tank_id:
+                for other in physics_engine.get_all_active_tanks():
+                    if other.id == self.blocking_tank_id and other.alive:
+                        avoid_tiles.add((int(round(other.x / tile_size)), int(round(other.y / tile_size))))
+                        break
+
+            # 若卡死帧数累积，把周围 2 格范围内的其他坦克格子全部加入回避列表促使大范围绕道
+            if self.stuck_frames > 6:
+                for other in physics_engine.get_all_active_tanks():
+                    if other != tank and other.alive:
+                        d = math.hypot(other.x - tank.x, other.y - tank.y)
+                        if d < tile_size * 2.5:
+                            avoid_tiles.add((int(round(other.x / tile_size)), int(round(other.y / tile_size))))
+
             self.path, self.ammo_needed = self.pathfinder.find_path(
                 tank.x, tank.y, self.dest_x, self.dest_y,
                 tank=tank,
-                limited_ammo_enabled=physics_engine.limited_ammo_enabled
+                limited_ammo_enabled=physics_engine.limited_ammo_enabled,
+                avoid_tiles=avoid_tiles if avoid_tiles else None
             )
             self.path_idx = 0
-            self.replan_timer = 45
+            self.replan_timer = 40
 
         self.replan_timer -= 1
 
         # 沿路径航点向前推进：确保真正达到当前航点后才切入垂直拐弯，杜绝过早拐弯刮蹭拐角砖块
-        tile_size = game_map.tile_size
         wp_reach_dist = max(3.0, tank.speed * 1.1)
 
         while self.path_idx < len(self.path):
@@ -132,6 +161,11 @@ class MoveCommand(BaseCommand):
             primary = Direction.DOWN if dy > 0 else Direction.UP
             secondary = Direction.RIGHT if dx > 0 else Direction.LEFT
 
+        cfg = getattr(tank, "_config", None)
+        b_speed = cfg.bullet_speed if cfg else 6.0
+        b_size = cfg.bullet_size if cfg else 12
+        b_color = cfg.bullet_color if cfg else ("#E69C24" if tank.camp == Camp.PLAYER else "#E63946")
+
         # 检测前路是否有砖块障碍待破障 (Auto-Breaching)
         target_col = int(round(target_x / tile_size))
         target_row = int(round(target_y / tile_size))
@@ -141,37 +175,77 @@ class MoveCommand(BaseCommand):
         if next_is_brick or self._check_front_has_brick(tank, primary, game_map):
             tank.direction = primary
             if tank.can_fire(physics_engine.limited_ammo_enabled):
-                cfg = getattr(tank, "_config", None)
-                b_speed = cfg.bullet_speed if cfg else 6.0
-                b_size = cfg.bullet_size if cfg else 12
-                b_color = cfg.bullet_color if cfg else ("#E69C24" if tank.camp == Camp.PLAYER else "#E63946")
                 physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
             return False
 
         moved = physics_engine.move_tank(tank, primary)
+        blocking_tank = None
 
-        if not moved and (abs(dx) > 2 or abs(dy) > 2):
-            if self._check_front_has_brick(tank, secondary, game_map):
-                tank.direction = secondary
+        if not moved:
+            step_x = tank.x + primary.dx * tank.speed
+            step_y = tank.y + primary.dy * tank.speed
+            blocking_tank = physics_engine.get_blocking_tank(tank, step_x, step_y)
+
+            # 阻挡者为敌军时，主动朝敌军开火迎击
+            if blocking_tank and blocking_tank.camp != tank.camp:
+                tank.direction = primary
                 if tank.can_fire(physics_engine.limited_ammo_enabled):
-                    cfg = getattr(tank, "_config", None)
-                    b_speed = cfg.bullet_speed if cfg else 6.0
-                    b_size = cfg.bullet_size if cfg else 12
-                    b_color = cfg.bullet_color if cfg else ("#E69C24" if tank.camp == Camp.PLAYER else "#E63946")
                     physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
-                return False
 
-            moved = physics_engine.move_tank(tank, secondary)
+            if abs(dx) > 2 or abs(dy) > 2:
+                if self._check_front_has_brick(tank, secondary, game_map):
+                    tank.direction = secondary
+                    if tank.can_fire(physics_engine.limited_ammo_enabled):
+                        physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
+                    return False
+
+                moved = physics_engine.move_tank(tank, secondary)
+                if not moved and not blocking_tank:
+                    sec_x = tank.x + secondary.dx * tank.speed
+                    sec_y = tank.y + secondary.dy * tank.speed
+                    blocking_tank = physics_engine.get_blocking_tank(tank, sec_x, sec_y)
+
+        # 侧向滑步规避脱困 (Lateral Evasion)
+        if not moved and blocking_tank:
+            self.blocking_tank_id = blocking_tank.id
+            if primary in (Direction.UP, Direction.DOWN):
+                lateral_dirs = [Direction.LEFT, Direction.RIGHT]
+            else:
+                lateral_dirs = [Direction.UP, Direction.DOWN]
+            for l_dir in lateral_dirs:
+                if physics_engine.move_tank(tank, l_dir):
+                    moved = True
+                    break
 
         if not moved:
             self.stuck_frames += 1
+            self.total_stuck_frames += 1
+
+            # 触发即时重寻路（带回避方格）
             if self.stuck_frames > 6:
-                # 遇阻无法前进时，立即触发重新寻路
                 self.path = None
-                self.stuck_frames = 0
                 self.replan_timer = 0
+
+            # 对撞死锁主动让行：若两辆友军对头卡死超过 18 帧，ID 较大的坦克倒车让道
+            if self.stuck_frames > 18 and blocking_tank and blocking_tank.camp == tank.camp:
+                if str(tank.id) > str(blocking_tank.id):
+                    rev_dir = Direction.DOWN if primary == Direction.UP else (
+                        Direction.UP if primary == Direction.DOWN else (
+                            Direction.RIGHT if primary == Direction.LEFT else Direction.LEFT
+                        )
+                    )
+                    self.yield_direction = rev_dir
+                    self.yield_timer = 12
+                    self.stuck_frames = 0
+
+            # 长期彻底卡死堵塞（>70 帧约 1.1s），放弃本次寻路，令上层切换阵位或换目标
+            if self.total_stuck_frames > 70:
+                self.stuck_frames = 0
+                return True
         else:
             self.stuck_frames = 0
+            self.total_stuck_frames = 0
+            self.blocking_tank_id = None
 
         return False
 
@@ -185,6 +259,8 @@ class AttackTargetCommand(BaseCommand):
         self.auto_clear_path = auto_clear_path
         self.move_subcmd: Optional[MoveCommand] = None
         self.last_target_pos = (0.0, 0.0)
+        self.standoff_idx: int = 0
+        self.stuck_attack_frames: int = 0
 
     def execute(self, tank: Tank, physics_engine, game_map: GameMap) -> bool:
         if not tank.alive or not self.target_tank.alive:
@@ -211,33 +287,66 @@ class AttackTargetCommand(BaseCommand):
         b_size = cfg.bullet_size if cfg else 12
         b_color = cfg.bullet_color if cfg else ("#E69C24" if tank.camp == Camp.PLAYER else "#E63946")
 
-        # 检查垂直轴对齐开火
+        # 1. 检查垂直轴对齐当前目标开火
         if is_aligned_v:
             tank.direction = Direction.DOWN if dy > 0 else Direction.UP
             los_clear = self.is_line_of_sight_clear(center_x, center_y, target_center_x, target_center_y, game_map)
             if los_clear:
+                self.stuck_attack_frames = 0
                 if tank.can_fire(physics_engine.limited_ammo_enabled):
                     physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
                 return False
             else:
                 is_infinite = (tank.ammo < 0 or not physics_engine.limited_ammo_enabled)
                 if is_infinite and tank.can_fire(physics_engine.limited_ammo_enabled):
+                    self.stuck_attack_frames = 0
                     physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
                     return False
 
-        # 检查水平轴对齐开火
+        # 2. 检查水平轴对齐当前目标开火
         if is_aligned_h:
             tank.direction = Direction.RIGHT if dx > 0 else Direction.LEFT
             los_clear = self.is_line_of_sight_clear(center_x, center_y, target_center_x, target_center_y, game_map)
             if los_clear:
+                self.stuck_attack_frames = 0
                 if tank.can_fire(physics_engine.limited_ammo_enabled):
                     physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
                 return False
             else:
                 is_infinite = (tank.ammo < 0 or not physics_engine.limited_ammo_enabled)
                 if is_infinite and tank.can_fire(physics_engine.limited_ammo_enabled):
+                    self.stuck_attack_frames = 0
                     physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
                     return False
+
+        # 3. 机会射击 (Opportunistic Fire)：若行进轴线上有其他在视线内的敌军，趁机开火
+        opp_tanks = physics_engine.enemy_tanks if tank.camp == Camp.PLAYER else physics_engine.player_tanks
+        if tank.camp == Camp.PLAYER and getattr(tank, "ai_script", None) is None:
+            cands = physics_engine.get_visible_enemies()
+        else:
+            cands = [t for t in opp_tanks if t.alive]
+
+        for cand in cands:
+            if cand == self.target_tank or not cand.alive:
+                continue
+            cand_cx = cand.x + cand.size / 2.0
+            cand_cy = cand.y + cand.size / 2.0
+            c_dx = cand_cx - center_x
+            c_dy = cand_cy - center_y
+            if abs(c_dx) <= align_threshold and math.hypot(c_dx, c_dy) < 320.0:
+                dir_cand = Direction.DOWN if c_dy > 0 else Direction.UP
+                if self.is_line_of_sight_clear(center_x, center_y, cand_cx, cand_cy, game_map):
+                    tank.direction = dir_cand
+                    if tank.can_fire(physics_engine.limited_ammo_enabled):
+                        physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
+                    break
+            elif abs(c_dy) <= align_threshold and math.hypot(c_dx, c_dy) < 320.0:
+                dir_cand = Direction.RIGHT if c_dx > 0 else Direction.LEFT
+                if self.is_line_of_sight_clear(center_x, center_y, cand_cx, cand_cy, game_map):
+                    tank.direction = dir_cand
+                    if tank.can_fire(physics_engine.limited_ammo_enabled):
+                        physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
+                    break
 
         # 如果自身是固定防御塔，不执行位移
         if tank.is_tower or tank.speed <= 0:
@@ -246,11 +355,25 @@ class AttackTargetCommand(BaseCommand):
                 physics_engine.spawn_bullet(tank, b_speed, b_size, b_color)
             return False
 
-        # 寻找进攻占位阵位 (Standoff Attack Position)
+        # 4. 寻找进攻占位阵位 (Standoff Attack Position)
         tx, ty = self.target_tank.x, self.target_tank.y
         dist_moved = math.hypot(self.last_target_pos[0] - tx, self.last_target_pos[1] - ty)
 
-        if self.move_subcmd is None or dist_moved > 18.0:
+        # 检查是否需要重新挑选阵位：
+        # - move_subcmd 为空
+        # - 目标移动超过半格
+        # - 当前机动子命令严重卡顿 (stuck_frames > 12)
+        should_replan_standoff = (
+            self.move_subcmd is None or
+            dist_moved > 18.0 or
+            (self.move_subcmd and self.move_subcmd.stuck_frames > 12)
+        )
+
+        if should_replan_standoff:
+            if self.move_subcmd and self.move_subcmd.stuck_frames > 12:
+                self.standoff_idx += 1
+                self.stuck_attack_frames += self.move_subcmd.stuck_frames
+
             c_target = int(round(tx / tile_size))
             r_target = int(round(ty / tile_size))
             c_me = int(round(tank.x / tile_size))
@@ -263,25 +386,43 @@ class AttackTargetCommand(BaseCommand):
                 (c_target + 1, r_target),
             ]
             valid_candidates = []
+            allied_tanks = physics_engine.player_tanks if tank.camp == Camp.PLAYER else physics_engine.enemy_tanks
             for sc, sr in standoff_candidates:
                 if 0 <= sc < game_map.cols and 0 <= sr < game_map.rows:
                     tile = game_map.get_tile(sc, sr)
                     if tile != TileType.STEEL:
-                        d = abs(sc - c_me) + abs(sr - r_me)
+                        d = float(abs(sc - c_me) + abs(sr - r_me))
+                        # 若已有友军占据该阵位，增加权重促使坦克选择包抄另一侧
+                        for other in allied_tanks:
+                            if other.alive and other != tank:
+                                if math.hypot(other.x - sc * tile_size, other.y - sr * tile_size) < tile_size * 0.9:
+                                    d += 50.0
                         valid_candidates.append((d, sc * tile_size, sr * tile_size))
 
             if valid_candidates:
                 valid_candidates.sort(key=lambda item: item[0])
-                dest_x, dest_y = valid_candidates[0][1], valid_candidates[0][2]
+                chosen = valid_candidates[self.standoff_idx % len(valid_candidates)]
+                dest_x, dest_y = chosen[1], chosen[2]
             else:
                 dest_x, dest_y = tx, ty
 
             self.move_subcmd = MoveCommand(dest_x, dest_y, tolerance=4.0, auto_clear_path=self.auto_clear_path)
             self.last_target_pos = (tx, ty)
 
-        arrived = self.move_subcmd.execute(tank, physics_engine, game_map)
+        subcmd_done = self.move_subcmd.execute(tank, physics_engine, game_map)
+
+        if self.move_subcmd.stuck_frames > 0:
+            self.stuck_attack_frames += 1
+        else:
+            self.stuck_attack_frames = max(0, self.stuck_attack_frames - 1)
+
+        # 若子命令因为死锁而提前返回（非真正到达目标点），或者累计死锁卡死超过 70 帧，放弃当前目标以便接续新目标
+        dist_to_subdest = math.hypot(self.move_subcmd.dest_x - tank.x, self.move_subcmd.dest_y - tank.y)
+        if (subcmd_done and dist_to_subdest > self.move_subcmd.tolerance) or self.stuck_attack_frames > 70:
+            return True
+
         # 到达射击阵位后，若仍存在微小轴向未对齐，主动朝目标轴线微调对齐，确保立刻开火
-        if arrived:
+        if subcmd_done and dist_to_subdest <= self.move_subcmd.tolerance:
             if abs(dx) < abs(dy):
                 step_dir = Direction.RIGHT if target_center_x > center_x else Direction.LEFT
                 physics_engine.move_tank(tank, step_dir)

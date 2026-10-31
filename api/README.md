@@ -78,7 +78,9 @@ Every request must be a valid JSON object. Both root-level attributes and nested
 
 ### 1. `api.pause()` & `api.resume()`
 
-Freezes or unfreezes the game engine's physical simulation, projectile updates, and enemy/friendly AI routines. Rendering and telemetry continue to function during pause.
+Freezes or unfreezes the game engine's physical simulation, projectile updates, and enemy/friendly AI routines. Rendering, telemetry, and planning APIs continue to function during pause.
+- **Default State on Startup**: The game starts in **PAUSED** mode by default to allow initial tactical planning and reconnaissance. Use `api.resume` or press the **P** key in the GUI/WebUI to start the simulation.
+- **Pre-Execution Queuing**: Tactical movement, targeting, and firing APIs (`command_move`, `command_attack`, `command_fire`, etc.) can be called during pause. They will be acknowledged and queued, executing immediately as soon as the engine is resumed.
 
 #### Request (Pause):
 ```json
@@ -485,7 +487,7 @@ The engine provides an autonomous tactical script execution layer in `ai_python/
 - **Threaded Execution**: Each autonomous unit (enemies and uncontrollable friendly units) executes its configured Python script (`ai_script` in mission JSON) within its own dedicated background `threading.Thread`.
 - **API Layer Translation**: Scripts interact with the game engine exclusively via `TankScriptAPI` (`ai_python/bridge.py`), which translates Python method invocations (`move`, `attack`, `fire`, `set_guard`, `report`, `get_opponents`, `get_allies`) into standard JSON API requests dispatched to `GameAPIController.handle_request()`.
 - **Omniscient Intelligence**: Tactical scripts are omniscient by default (`god_mode=True`), possessing full situational awareness of all units and terrain without fog-of-war restrictions.
-- **Friendly Controllability**: Friendly units can be designated as non-controllable (`controllable: false`). Non-controllable units cannot be selected or micro-manipulated in the GUI and execute autonomous tactical scripts (e.g. `ai_python/ally_escort.py`).
+- **Friendly Controllability**: Friendly units can be designated as non-controllable (`controllable: false`). Non-controllable units are always listed in `list_current_unit_id` and share vision across the entire team (clearing fog-of-war and spotting enemies for all friendly units). External commands targeting them succeed without error (`status: "ok"`), but are not executed on them, ensuring these units autonomously execute their own predetermined AI scripts.
 
 ### Example Tactical Python Script (`ai_python/boss_hunter.py`):
 ```python

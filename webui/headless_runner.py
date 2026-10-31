@@ -64,13 +64,14 @@ class HeadlessGameRunner(QObject):
 
         self.game_over = False
         self.game_victory = False
-        self.is_paused = False
+        self.is_paused = True
 
         self._setup_mission_entities()
 
         # 启动战术脚本线程
         all_tanks = self.physics_engine.player_tanks + self.physics_engine.enemy_tanks
         self.ai_script_manager.start_scripts(all_tanks, self.api_controller, self.base_dir)
+        self.ai_script_manager.pause()
 
         self._setup_conditions()
 
@@ -89,6 +90,8 @@ class HeadlessGameRunner(QObject):
         self.is_paused = False
         if hasattr(self, "ai_script_manager"):
             self.ai_script_manager.resume()
+        if hasattr(self, "api_controller"):
+            self.api_controller.flush_pending_actions()
 
     def _setup_conditions(self):
         self.condition_ctx = ConditionContext(self.physics_engine, self.game_map)
@@ -284,6 +287,11 @@ class HeadlessGameRunner(QObject):
                     self.command_dispatcher.toggle_auto_clear_path(target_tanks)
             elif norm_key == "s":
                 self.command_dispatcher.issue_stop(self.selection_mgr.get_selected())
+            elif norm_key == "p":
+                if self.is_paused:
+                    self.resume()
+                else:
+                    self.pause()
             elif norm_key == "r" and (self.game_over or self.game_victory):
                 self.restart()
         else:
@@ -296,6 +304,12 @@ class HeadlessGameRunner(QObject):
             b_speed = cfg.bullet_speed if cfg else 6.0
             b_size = cfg.bullet_size if cfg else 12
             b_color = cfg.bullet_color if cfg else "#FFFFFF"
+            if self.is_paused:
+                if hasattr(self, "api_controller"):
+                    self.api_controller.pending_actions.append(
+                        lambda: self.physics_engine.spawn_bullet(micro, b_speed, b_size, b_color)
+                    )
+                return
             self.physics_engine.spawn_bullet(micro, b_speed, b_size, b_color)
 
     def _process_micro_tank_input(self) -> bool:
@@ -324,9 +338,12 @@ class HeadlessGameRunner(QObject):
 
         self.game_over = False
         self.game_victory = False
+        self.is_paused = True
         self.active_keys.clear()
         self.preview_box = None
         self.command_marker = None
+        if hasattr(self, "api_controller"):
+            self.api_controller.pending_actions.clear()
         self.physics_engine = PhysicsEngine(
             self.game_map,
             fog_of_war_enabled=self.mission.fog_of_war,
@@ -341,6 +358,7 @@ class HeadlessGameRunner(QObject):
         if hasattr(self, "ai_script_manager") and hasattr(self, "api_controller"):
             all_tanks = self.physics_engine.player_tanks + self.physics_engine.enemy_tanks
             self.ai_script_manager.start_scripts(all_tanks, self.api_controller, self.base_dir)
+            self.ai_script_manager.pause()
 
         if self.physics_engine.player_tanks:
             self.selection_mgr.select_single(self.physics_engine.player_tanks[0])

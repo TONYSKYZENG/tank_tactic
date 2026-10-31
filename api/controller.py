@@ -21,6 +21,7 @@ class GameAPIController:
         """
         self.game_context = game_context
         self.termination_handler = termination_handler
+        self.pending_actions: List[Callable[[], None]] = []
 
     def handle_request(self, raw_data: str) -> str:
         """接收纯文本 JSON 请求并返回纯文本 JSON 响应"""
@@ -124,7 +125,7 @@ class GameAPIController:
 
     # ================= 1. api.pause() / api.resume() =================
 
-    def pause(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def pause(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """暂停引擎运行，同时全量冻结所有高级 AI 战术脚本线程"""
         if hasattr(self.game_context, "pause"):
             self.game_context.pause()
@@ -137,8 +138,8 @@ class GameAPIController:
 
         return {"status": "ok", "paused": True, "message": "Engine and all AI scripts paused"}
 
-    def resume(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """恢复引擎运行，同时全量解冻所有高级 AI 战术脚本线程"""
+    def resume(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """恢复引擎运行，同时全量解冻所有高级 AI 战术脚本线程，并立刻执行暂停期间暂存的动作"""
         if hasattr(self.game_context, "resume"):
             self.game_context.resume()
         elif hasattr(self.game_context, "is_paused"):
@@ -148,9 +149,24 @@ class GameAPIController:
         if mgr and hasattr(mgr, "resume"):
             mgr.resume()
 
+        # 立刻执行暂停期间积累的动作（如 command_fire 等）
+        self.flush_pending_actions()
+
         return {"status": "ok", "paused": False, "message": "Engine and all AI scripts resumed"}
 
-    def is_paused(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def flush_pending_actions(self) -> None:
+        """执行暂停期间积累的动作（开火等）"""
+        if not self.pending_actions:
+            return
+        actions = list(self.pending_actions)
+        self.pending_actions.clear()
+        for act in actions:
+            try:
+                act()
+            except Exception as e:
+                logger.exception("Error executing pending action: %s", e)
+
+    def is_paused(self, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """查询引擎当前是否处于暂停状态"""
         is_p = bool(getattr(self.game_context, "is_paused", False))
         return {"status": "ok", "paused": is_p}
@@ -191,6 +207,7 @@ class GameAPIController:
 
     def restart(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """重置战局并重新启动游戏引擎"""
+        self.pending_actions.clear()
         if hasattr(self.game_context, "restart"):
             self.game_context.restart()
             return {"status": "ok", "message": "Game restarted successfully"}
@@ -201,7 +218,7 @@ class GameAPIController:
     def list_current_unit_id(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         返回当前还存活的所有己方单位 ID，以逗号隔开。
-        并对己方单位启用辨识度 visibility，对部分存活单位有概率 list 不到（god_mode=True 时无视概率直接全知列出）。
+        包含可操控与不可操控的所有己方单位（不能被操控的我方单位始终必然被列出，其余单位受 visibility 影响）。
         """
         physics = getattr(self.game_context, "physics_engine", None)
         if not physics:
@@ -212,8 +229,9 @@ class GameAPIController:
         for tank in physics.player_tanks:
             if tank.alive:
                 vis = getattr(tank, "visibility", 1.0)
-                # 辨识度判定：god_mode 或 1.0 必能被列出；0.0~1.0 按概率列出
-                if god_mode or vis >= 1.0 or random.random() < vis:
+                is_uncontrollable = not getattr(tank, "controllable", True)
+                # 辨识度判定：不能被操控的我方单位始终必然被列出；其他单位在 god_mode、vis>=1.0 或按概率列出
+                if is_uncontrollable or god_mode or vis >= 1.0 or random.random() < vis:
                     visible_ids.append(tank.id)
 
         unit_ids_str = ",".join(visible_ids)
@@ -378,6 +396,23 @@ class GameAPIController:
     # 保持向后兼容
     _get_target_player_tanks = _get_target_tanks
 
+    def _can_execute_command(self, tank: Any, params: Dict[str, Any]) -> bool:
+        """
+        判断指定坦克是否允许执行该控制指令：
+        - 若单位为可操控单位 (controllable=True)，始终允许执行外部与内部指令；
+        - 若单位为不可操控单位 (controllable=False)：
+          仅当该指令是由该单位自身的战术脚本 (TankScriptAPI) 内部发起时才允许执行；
+          外部指令（如玩家/网络 API/测试下发的指令）被安全静默忽略（不报错，亦不覆盖其预定脚本的自主决策）。
+        """
+        if getattr(tank, "controllable", True):
+            return True
+
+        caller_id = params.get("_caller_unit_id") or params.get("caller") or params.get("sender")
+        if caller_id and str(caller_id).strip() == str(tank.id).strip():
+            return True
+
+        return False
+
     def command_move(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """按照 ID 批量移动单位到 (x, y)"""
         dispatcher = getattr(self.game_context, "command_dispatcher", None)
@@ -394,14 +429,22 @@ class GameAPIController:
         except (ValueError, TypeError):
             return {"status": "error", "error": "Invalid x, y coordinates"}
 
-        dispatcher.issue_move(tanks, x, y)
-        return {
+        executable_tanks = [t for t in tanks if self._can_execute_command(t, params)]
+        if executable_tanks:
+            dispatcher.issue_move(executable_tanks, x, y)
+
+        is_p = bool(getattr(self.game_context, "is_paused", False))
+        res = {
             "status": "ok",
             "command": "command_move",
             "destination": {"x": x, "y": y},
-            "affected_units": [t.id for t in tanks],
-            "count": len(tanks)
+            "affected_units": [t.id for t in executable_tanks],
+            "count": len(executable_tanks)
         }
+        if is_p and executable_tanks:
+            res["queued"] = True
+            res["message"] = "Move command issued while paused, will execute immediately upon resume"
+        return res
 
     def command_attack(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """按照 ID 批量攻击指定目标"""
@@ -436,21 +479,26 @@ class GameAPIController:
         if not target_tank:
             return {"status": "error", "error": f"Target unit '{target_id}' not found or destroyed"}
 
-        god_mode = bool(params.get("god_mode", False) or params.get("ignore_vision", False))
-        dispatcher.issue_attack_target(tanks, target_tank, physics, ignore_vision=god_mode)
-        return {
+        executable_tanks = [t for t in tanks if self._can_execute_command(t, params)]
+        if executable_tanks:
+            god_mode = bool(params.get("god_mode", False) or params.get("ignore_vision", False))
+            dispatcher.issue_attack_target(executable_tanks, target_tank, physics, ignore_vision=god_mode)
+
+        is_p = bool(getattr(self.game_context, "is_paused", False))
+        res = {
             "status": "ok",
             "command": "command_attack",
             "target_id": target_tank.id,
-            "affected_units": [t.id for t in tanks],
-            "count": len(tanks)
+            "affected_units": [t.id for t in executable_tanks],
+            "count": len(executable_tanks)
         }
+        if is_p and executable_tanks:
+            res["queued"] = True
+            res["message"] = "Attack command issued while paused, will execute immediately upon resume"
+        return res
 
     def command_fire(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """按照 ID 批量让坦克向指定或当前朝向开火"""
-        if getattr(self.game_context, "is_paused", False):
-            return {"status": "error", "error": "Cannot fire while engine is paused"}
-
         physics = getattr(self.game_context, "physics_engine", None)
         if not physics:
             return {"status": "error", "error": "Physics engine not available"}
@@ -460,9 +508,55 @@ class GameAPIController:
         if not tanks:
             return {"status": "error", "error": "No matching alive units found"}
 
-        fired_units = []
+        executable_tanks = [t for t in tanks if self._can_execute_command(t, params)]
+        if not executable_tanks:
+            return {
+                "status": "ok",
+                "command": "command_fire",
+                "fired_units": [],
+                "count": 0
+            }
+
         dir_str = params.get("direction")
-        for tank in tanks:
+        unit_ids = [t.id for t in executable_tanks]
+
+        # 若处于暂停状态，不立刻开火，暂存到 pending_actions，解除暂停后立刻执行
+        if getattr(self.game_context, "is_paused", False):
+            if dir_str:
+                d_name = str(dir_str).upper()
+                if hasattr(Direction, d_name):
+                    for tank in executable_tanks:
+                        tank.direction = getattr(Direction, d_name)
+
+            def execute_fire():
+                curr_tanks = self._get_target_tanks(unit_ids)
+                curr_executable = [t for t in curr_tanks if self._can_execute_command(t, params)]
+                for tank in curr_executable:
+                    if not tank.alive:
+                        continue
+                    if dir_str:
+                        d_name = str(dir_str).upper()
+                        if hasattr(Direction, d_name):
+                            tank.direction = getattr(Direction, d_name)
+                    if tank.can_fire(physics.limited_ammo_enabled):
+                        cfg = getattr(tank, "_config", None)
+                        b_speed = cfg.bullet_speed if cfg else 6.0
+                        b_size = cfg.bullet_size if cfg else 12
+                        b_color = cfg.bullet_color if cfg else ("#E69C24" if tank.camp == Camp.PLAYER else "#E63946")
+                        physics.spawn_bullet(tank, b_speed, b_size, b_color)
+
+            self.pending_actions.append(execute_fire)
+            return {
+                "status": "ok",
+                "command": "command_fire",
+                "fired_units": unit_ids,
+                "count": len(unit_ids),
+                "queued": True,
+                "message": "Fire command queued while paused, will execute immediately upon resume"
+            }
+
+        fired_units = []
+        for tank in executable_tanks:
             if not tank.alive:
                 continue
             if dir_str:
@@ -517,14 +611,16 @@ class GameAPIController:
         else:
             return {"status": "error", "error": f"Unknown tactic '{tactic_str}'"}
 
-        dispatcher.issue_tactic(tanks, tactic_mode, guard_target=guard_target)
+        executable_tanks = [t for t in tanks if self._can_execute_command(t, params)]
+        if executable_tanks:
+            dispatcher.issue_tactic(executable_tanks, tactic_mode, guard_target=guard_target)
         return {
             "status": "ok",
             "command": "command_set_tactic",
             "tactic": tactic_mode.value,
             "guard_target": guard_target.id if guard_target else None,
-            "affected_units": [t.id for t in tanks],
-            "count": len(tanks)
+            "affected_units": [t.id for t in executable_tanks],
+            "count": len(executable_tanks)
         }
 
     def command_set_guard(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -557,13 +653,15 @@ class GameAPIController:
         if not guard_target:
             return {"status": "error", "error": f"Guard target '{target_id}' not found"}
 
-        dispatcher.issue_guard_unit(tanks, guard_target)
+        executable_tanks = [t for t in tanks if self._can_execute_command(t, params)]
+        if executable_tanks:
+            dispatcher.issue_guard_unit(executable_tanks, guard_target)
         return {
             "status": "ok",
             "command": "command_set_guard",
             "guard_target": guard_target.id,
-            "affected_units": [t.id for t in tanks],
-            "count": len(tanks)
+            "affected_units": [t.id for t in executable_tanks],
+            "count": len(executable_tanks)
         }
 
     # ================= 6. api.report / 全知情报 =================

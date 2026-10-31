@@ -42,10 +42,11 @@ class TankScriptAPI:
 
     def _call(self, action: str, **params) -> Dict[str, Any]:
         """将 Python 方法调用转写为标准 JSON 协议字符串，与 GameAPIController 交互"""
-        # 动作下发前检测：如果引擎被暂停，立即冻结等待恢复
-        self.wait_if_paused()
         if self.stop_event.is_set():
             return {"status": "error", "error": "Script thread stopping"}
+
+        # 标记本次 API 指令是由本车内部独立战术脚本发起的，享有本车动作执行权限
+        params["_caller_unit_id"] = self.tank_id
 
         payload = {
             "action": action,

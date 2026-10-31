@@ -373,5 +373,88 @@ class TestGameAPI(unittest.TestCase):
 
         manager.stop()
 
+    def test_commands_while_paused_and_execution_on_resume(self):
+        """测试在暂停状态下执行 move, attack, fire，并在 resume 后立刻生效"""
+        # 1. 暂停引擎
+        self.mock_game.pause()
+        self.assertTrue(self.mock_game.is_paused)
+
+        # 2. 暂停期间执行 move
+        init_x, init_y = self.mock_game.p1.x, self.mock_game.p1.y
+        move_resp = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.command_move",
+            "unit_ids": "player_alpha",
+            "x": 200.0,
+            "y": 200.0
+        })))
+        self.assertEqual(move_resp["status"], "ok")
+        self.assertTrue(move_resp.get("queued", False))
+        # 坐标未变（不立刻执行物理移动）
+        self.assertEqual(self.mock_game.p1.x, init_x)
+        self.assertEqual(self.mock_game.p1.y, init_y)
+
+        # 3. 暂停期间执行 attack
+        attack_resp = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.command_attack",
+            "unit_ids": "player_alpha",
+            "target_id": "enemy_boss"
+        })))
+        self.assertEqual(attack_resp["status"], "ok")
+        self.assertTrue(attack_resp.get("queued", False))
+
+        # 4. 暂停期间执行 fire
+        self.assertEqual(len(self.mock_game.physics_engine.bullets), 0)
+        fire_resp = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.command_fire",
+            "unit_ids": "player_alpha",
+            "direction": "UP"
+        })))
+        self.assertEqual(fire_resp["status"], "ok")
+        self.assertTrue(fire_resp.get("queued", False))
+        # 子弹尚未生成
+        self.assertEqual(len(self.mock_game.physics_engine.bullets), 0)
+
+        # 5. 解除暂停 (resume)
+        resume_resp = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.resume"
+        })))
+        self.assertEqual(resume_resp["status"], "ok")
+        self.assertFalse(self.mock_game.is_paused)
+
+        # 解除暂停瞬间，开火动作立刻被执行并生成子弹
+        self.assertEqual(len(self.mock_game.physics_engine.bullets), 1)
+
+    def test_headless_runner_default_paused_and_p_key(self):
+        """测试 HeadlessGameRunner 默认启动为暂停，按 P 键或网络 resume 启动"""
+        from webui.headless_runner import HeadlessGameRunner
+        from mission_loader import MissionLoader
+        from map_loader import MapLoader
+
+        mission = MissionLoader.load_from_file(BASE_DIR / "missions/mission_01.json")
+        game_map = MapLoader.load_from_file(BASE_DIR / mission.map_file)
+
+        runner = HeadlessGameRunner(mission, game_map, BASE_DIR)
+        # 默认启动后处于暂停状态
+        self.assertTrue(runner.is_paused)
+        if hasattr(runner, "ai_script_manager"):
+            self.assertTrue(runner.ai_script_manager.is_paused())
+
+        # 按 P 键恢复运行
+        runner.handle_key_event("p", is_down=True)
+        self.assertFalse(runner.is_paused)
+        if hasattr(runner, "ai_script_manager"):
+            self.assertFalse(runner.ai_script_manager.is_paused())
+
+        # 再次按 P 键暂停
+        runner.handle_key_event("p", is_down=True)
+        self.assertTrue(runner.is_paused)
+
+        # 通过 API resume 恢复
+        resp = json.loads(runner.api_controller.handle_request(json.dumps({"action": "api.resume"})))
+        self.assertEqual(resp["status"], "ok")
+        self.assertFalse(runner.is_paused)
+
+        runner.stop()
+
 if __name__ == "__main__":
     unittest.main()

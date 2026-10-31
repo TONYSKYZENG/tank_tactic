@@ -192,6 +192,15 @@ class PhysicsEngine:
 
         return True
 
+    def get_blocking_tank(self, moving_tank: Tank, new_x: float, new_y: float) -> Optional[Tank]:
+        """返回在 (new_x, new_y) 处阻挡 moving_tank 前进的其他活动坦克（若有）"""
+        exact_tank_rect = Rect(new_x, new_y, moving_tank.size, moving_tank.size)
+        for other in self.get_all_active_tanks():
+            if other is not moving_tank and other.alive:
+                if exact_tank_rect.collides_with(other.rect):
+                    return other
+        return None
+
     def find_nearest_free_position(self, start_x: float, start_y: float, size: int) -> Tuple[float, float]:
         tile_size = self.game_map.tile_size
         aligned_start_x = round(start_x / tile_size) * tile_size

@@ -222,6 +222,8 @@ python3 tanks.py --monitor-host 0.0.0.0 --monitor-port 9999
 
 #### 1. `api.pause()` 与 `api.resume()`
 - **功能**：暂停或恢复游戏物理与战术引擎的循环。
+  - **默认启动状态**：游戏引擎默认启动后处于 **暂停 (PAUSED)** 状态，以便外部控制器或玩家进行初始战术侦察与指令部署；调用 `api.resume` 或在 GUI / Web 界面按下 **P** 键即可正式开始运转。
+  - **暂停期指令预部署**：在暂停状态下允许执行所有的移动 (`move`) 与攻击/开火 (`attack`/`fire`) API。指令将进入就绪队列，在解除暂停瞬间立刻执行。
 - **请求格式**：
   ```json
   {"action": "api.pause"}
@@ -256,10 +258,10 @@ python3 tanks.py --monitor-host 0.0.0.0 --monitor-port 9999
 
 #### 4. `api.list_current_unit_id` 与 `api.list_enemy_curr`
 - **功能**：
-  - `api.list_current_unit_id`：返回当前存活的所有己方单位 ID，以**逗号隔开**（结合 `visibility` 概率过滤）；
+  - `api.list_current_unit_id`：返回当前存活的所有己方单位 ID，以**逗号隔开**（包含不可控己方单位，不可控友军始终必然被列出）；
   - `api.list_enemy_curr`：列出当前存活的敌方单位 ID（以逗号隔开）：
     - **上帝视角模式 (`god_mode: true`)**：无视迷雾透视全图敌军；
-    - **我方视野探测模式 (`god_mode: false`)**：仅汇总所有存活我方单位视线，在视线范围内的敌军按其自身辨识度 `visibility` 概率加入列表。
+    - **我方视野探测模式 (`god_mode: false`)**：仅汇总所有存活我方单位视线（可控与不可控单位全员共享视野），在视线范围内的敌军按其自身辨识度 `visibility` 概率加入列表。
 - **请求格式**：
   ```json
   {"action": "api.list_current_unit_id"}
@@ -306,6 +308,7 @@ python3 tanks.py --monitor-host 0.0.0.0 --monitor-port 9999
 
 #### 6. `api.command_move` / `attack` / `set_tactic` / `set_guard`
 - **功能**：按照指定 `unit_ids` 批量对己方单位下发控制指令。
+  - **不可控友军保护机制**：对于不可控己方单位（`controllable=false`），外部尝试命令它们时不会报错（返回 `status: ok`），但指令本身不会被执行，确保这些单位完全受其预定的 AI 战术脚本自主调度。
 - **批量移动**：
   ```json
   {"action": "api.command_move", "unit_ids": "player_alpha,player_bravo", "x": 200, "y": 300}

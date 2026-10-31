@@ -260,11 +260,12 @@
         <button class="btn btn-secondary" onclick="sendKey('2', true); setTimeout(()=>sendKey('2', false), 50)">[2] 坚守阵地</button>
         <button class="btn btn-secondary" onclick="sendKey('3', true); setTimeout(()=>sendKey('3', false), 50)">[3] 护卫单位</button>
         <button class="btn btn-secondary" onclick="sendKey('s', true); setTimeout(()=>sendKey('s', false), 50)">[S] 就地待命</button>
+        <button class="btn btn-secondary" onclick="sendKey('p', true); setTimeout(()=>sendKey('p', false), 50)">[P] 暂停/开始</button>
         <button class="btn btn-secondary" onclick="sendKey('r', true); setTimeout(()=>sendKey('r', false), 50)">[R] 重置战局</button>
       </div>
 
       <div class="keys-guide">
-        <b>帝国时代操作</b>: <span class="key-tag">鼠标左键</span> 拖拽框选 | <span class="key-tag">鼠标右键</span> 移动/集火攻击 | <span class="key-tag">Tab</span> 切换微操坦克 | <span class="key-tag">方向键/空格</span> 直接微操驾驶 | <span class="key-tag">1/2/3</span> 批量战术
+        <b>帝国时代操作</b>: <span class="key-tag">鼠标左键</span> 拖拽框选 | <span class="key-tag">鼠标右键</span> 移动/集火攻击 | <span class="key-tag">Tab</span> 切换微操坦克 | <span class="key-tag">方向键/空格</span> 直接微操驾驶 | <span class="key-tag">1/2/3</span> 批量战术 | <span class="key-tag">P</span> 暂停/恢复
       </div>
     </footer>
   </main>
@@ -480,7 +481,7 @@
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     // 键盘监听
-    const interceptKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Space', 'w', 'a', 's', 'd', 'r', 'Tab', '1', '2', '3', 'b', 'B'];
+    const interceptKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Space', 'w', 'a', 's', 'd', 'r', 'Tab', '1', '2', '3', 'b', 'B', 'p', 'P'];
     window.addEventListener('keydown', (e) => {
       if (interceptKeys.includes(e.key)) {
         e.preventDefault();

@@ -188,9 +188,16 @@ class TestAIScriptManagerExecution(unittest.TestCase):
         self.assertTrue(self.ctx.is_paused)
         self.assertTrue(self.manager.is_paused())
 
-        # 暂停时开火应被拦截
+        # 暂停状态下允许执行移动与开火 API，但不立刻生成子弹或物理位移，而是暂存待恢复后立刻执行
+        res_move = json.loads(self.api_controller.handle_request(json.dumps({"action": "command_move", "params": {"unit_ids": ["player_1"], "x": 200, "y": 200}})))
+        self.assertEqual(res_move.get("status"), "ok")
+        self.assertTrue(res_move.get("queued", False))
+
         res_fire = json.loads(self.api_controller.handle_request(json.dumps({"action": "command_fire", "params": {"unit_ids": ["player_1"]}})))
-        self.assertEqual(res_fire.get("status"), "error")
+        self.assertEqual(res_fire.get("status"), "ok")
+        self.assertTrue(res_fire.get("queued", False))
+        # 暂停中，子弹尚未发射进入物理引擎
+        self.assertEqual(len(self.ctx.physics_engine.bullets), 0)
 
         # 脚本 API 也会感知暂停
         stop_event = threading.Event()
@@ -203,6 +210,9 @@ class TestAIScriptManagerExecution(unittest.TestCase):
         self.assertFalse(self.ctx.is_paused)
         self.assertFalse(self.manager.is_paused())
         self.assertFalse(api.is_engine_paused())
+
+        # 恢复后，暂停期间暂存的开火指令立刻执行完毕
+        self.assertEqual(len(self.ctx.physics_engine.bullets), 1)
 
 
 class TestMissionConfiguration(unittest.TestCase):
@@ -428,6 +438,146 @@ class TestSmartPathfindingAndBreaching(unittest.TestCase):
         # 验证坦克顺利穿过通道与拐角抵达终点，未卡在拐角砖墙内
         self.assertAlmostEqual(tank.x, 3 * 36, delta=6.0)
         self.assertAlmostEqual(tank.y, 3 * 36, delta=6.0)
+
+
+class TestUncontrollableFriendlyUnits(unittest.TestCase):
+    """
+    测试不可控己方单位的完整行为准则：
+    1. 能被 list 接口正常列出 (list_current_unit_id / list_allies)；
+    2. 在所有需要共享视野的地方（迷雾消除、敌军发现、集火目标探测等）共享视野；
+    3. 外部尝试命令它们时不报错 (status='ok')，但命令本身不被执行；
+    4. 这些单位自身的独立脚本能自主下达并执行命令。
+    """
+
+    def setUp(self):
+        self.ctx = MockGameContext()
+        self.api_controller = GameAPIController(self.ctx)
+        self.stop_event = threading.Event()
+        self.script_api = TankScriptAPI("player_bravo", self.api_controller, self.stop_event)
+
+    def test_uncontrollable_units_listed(self):
+        """1. 不能被操控的我方单位也能被 list 出来"""
+        resp = json.loads(self.api_controller.handle_request(json.dumps({
+            "action": "api.list_current_unit_id"
+        })))
+        self.assertEqual(resp["status"], "ok")
+        unit_ids = resp["unit_ids"].split(",")
+        self.assertIn("player_bravo", unit_ids)
+        self.assertIn("player_1", unit_ids)
+
+        resp_allies = json.loads(self.api_controller.handle_request(json.dumps({
+            "action": "api.list_allies",
+            "unit_id": "player_1"
+        })))
+        self.assertEqual(resp_allies["status"], "ok")
+        ally_ids = [u["id"] for u in resp_allies["units"]]
+        self.assertIn("player_bravo", ally_ids)
+
+    def test_uncontrollable_units_share_vision(self):
+        """2. 不可操控我方单位在所有需要共享视野的地方共享视野"""
+        # 将迷雾开启
+        self.ctx.physics_engine.fog_of_war_enabled = True
+
+        # player_1 在 (100, 100), vision_size=200 -> 视野范围 [0, 200] x [0, 200]
+        # player_bravo 在 (150, 100), vision_size=260 -> 视野范围 [20, 280] x [-30, 230]
+        # 在 (250, 100) 放置一个敌军：该位置超出 player_1 视野 (100+100=200)，但处于 player_bravo 视野内！
+        far_enemy = Tank(x=250, y=100, size=32, speed=2.0, camp=Camp.ENEMY, tank_id="far_enemy", visibility=1.0)
+        self.ctx.physics_engine.add_enemy_tank(far_enemy)
+
+        # 帧更新视线
+        self.ctx.physics_engine.update_vision_and_stealth()
+
+        # 验证该敌军被 player_bravo 共享的视野探测到
+        self.assertTrue(far_enemy.is_spotted)
+        self.assertTrue(self.ctx.physics_engine.is_enemy_visible(far_enemy))
+        self.assertIn(far_enemy, self.ctx.physics_engine.get_visible_enemies())
+
+        # 验证外部视野 list_enemy_curr 也能通过共享视野探知该敌军
+        resp_enemy = json.loads(self.api_controller.handle_request(json.dumps({
+            "action": "api.list_enemy_curr"
+        })))
+        self.assertIn("far_enemy", resp_enemy["unit_ids"])
+
+        # 验证 player_1 (可控单位) 也可以直接集火该共享视野发现的敌军
+        cmd_atk = json.loads(self.api_controller.handle_request(json.dumps({
+            "action": "api.command_attack",
+            "unit_ids": "player_1",
+            "target_id": "far_enemy"
+        })))
+        self.assertEqual(cmd_atk["status"], "ok")
+        self.assertIn("player_1", cmd_atk["affected_units"])
+
+    def test_external_command_on_uncontrollable_unit_does_not_execute(self):
+        """3. 外部尝试命令不可控单位时不报错，但命令本身不执行"""
+        # 3.1 外部下发移动指令给 player_bravo
+        res_move = json.loads(self.api_controller.handle_request(json.dumps({
+            "action": "api.command_move",
+            "unit_ids": "player_bravo",
+            "x": 500.0,
+            "y": 500.0
+        })))
+        self.assertEqual(res_move["status"], "ok")
+        self.assertEqual(res_move["affected_units"], [])
+        self.assertIsNone(self.ctx.command_dispatcher.tank_commands.get("player_bravo"))
+
+        # 3.2 外部下发集火指令给 player_bravo
+        res_attack = json.loads(self.api_controller.handle_request(json.dumps({
+            "action": "api.command_attack",
+            "unit_ids": "player_bravo",
+            "target_id": "enemy_1"
+        })))
+        self.assertEqual(res_attack["status"], "ok")
+        self.assertEqual(res_attack["affected_units"], [])
+        self.assertIsNone(self.ctx.command_dispatcher.tank_commands.get("player_bravo"))
+
+        # 3.3 外部下发开火指令给 player_bravo
+        bullet_count = len(self.ctx.physics_engine.bullets)
+        res_fire = json.loads(self.api_controller.handle_request(json.dumps({
+            "action": "api.command_fire",
+            "unit_ids": "player_bravo"
+        })))
+        self.assertEqual(res_fire["status"], "ok")
+        self.assertEqual(res_fire["fired_units"], [])
+        self.assertEqual(len(self.ctx.physics_engine.bullets), bullet_count)
+
+        # 3.4 外部下发战术姿态给 player_bravo
+        res_tactic = json.loads(self.api_controller.handle_request(json.dumps({
+            "action": "api.command_set_tactic",
+            "unit_ids": "player_bravo",
+            "tactic": "aggressive"
+        })))
+        self.assertEqual(res_tactic["status"], "ok")
+        self.assertEqual(res_tactic["affected_units"], [])
+
+        # 3.5 外部全选下发指令 (player_1 和 player_bravo)
+        res_batch = json.loads(self.api_controller.handle_request(json.dumps({
+            "action": "api.command_move",
+            "unit_ids": "player_1,player_bravo",
+            "x": 300.0,
+            "y": 300.0
+        })))
+        self.assertEqual(res_batch["status"], "ok")
+        self.assertEqual(res_batch["affected_units"], ["player_1"])
+        # player_1 被下达了指令，player_bravo 没有
+        self.assertIsNotNone(self.ctx.command_dispatcher.tank_commands.get("player_1"))
+        self.assertIsNone(self.ctx.command_dispatcher.tank_commands.get("player_bravo"))
+
+    def test_own_script_can_command_uncontrollable_unit(self):
+        """4. 不可控单位执行自己预定的独立战术脚本"""
+        # 由其内部脚本发出的指令正常执行
+        res_move = self.script_api.move(350.0, 350.0)
+        self.assertEqual(res_move["status"], "ok")
+        self.assertEqual(res_move["affected_units"], ["player_bravo"])
+        self.assertIsNotNone(self.ctx.command_dispatcher.tank_commands.get("player_bravo"))
+
+        # 由其内部脚本发出的开火指令正常执行
+        bullet_count = len(self.ctx.physics_engine.bullets)
+        self.ctx.p_auto.fire_cooldown = 0
+        self.ctx.p_auto.ammo = 10
+        res_fire = self.script_api.fire("UP")
+        self.assertEqual(res_fire["status"], "ok")
+        self.assertEqual(res_fire["fired_units"], ["player_bravo"])
+        self.assertEqual(len(self.ctx.physics_engine.bullets), bullet_count + 1)
 
 
 if __name__ == "__main__":

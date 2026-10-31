@@ -8,7 +8,18 @@ import sys
 import json
 import socket
 import argparse
-from typing import Optional
+from typing import Optional, List, Tuple, Any
+
+def clean_unit_ids(val: Any) -> str:
+    """清理并规整输入的单位 ID 参数（去除方括号、统一逗号分割）"""
+    if not val:
+        return ""
+    if isinstance(val, (list, tuple)):
+        return ",".join(str(v).strip("[] \t\r\n") for v in val if str(v).strip("[] \t\r\n"))
+    s = str(val).strip("[] \t\r\n")
+    parts = [p.strip("[] \t\r\n") for p in s.replace(",", " ").split() if p.strip("[] \t\r\n")]
+    return ",".join(parts)
+
 
 class TanksConsoleClient:
     def __init__(self, host: str = "127.0.0.1", port: int = 8091, timeout: float = 3.0):
@@ -16,6 +27,33 @@ class TanksConsoleClient:
         self.port = port
         self.timeout = timeout
         self.sock: Optional[socket.socket] = None
+
+    @staticmethod
+    def parse_command_line(line: str) -> Tuple[str, List[str]]:
+        """智能解析命令行，保持方括号内的单位列表 [unit_a, unit_b] 为整体 token"""
+        line = line.strip()
+        tokens = []
+        current = []
+        in_bracket = False
+        for char in line:
+            if char == '[':
+                in_bracket = True
+                current.append(char)
+            elif char == ']':
+                in_bracket = False
+                current.append(char)
+            elif char.isspace() and not in_bracket:
+                if current:
+                    tokens.append("".join(current))
+                    current = []
+            else:
+                current.append(char)
+        if current:
+            tokens.append("".join(current))
+
+        if not tokens:
+            return "", []
+        return tokens[0].lower(), tokens[1:]
 
     def connect(self) -> bool:
         try:
@@ -136,9 +174,9 @@ Examples:
             self._print_response(resp)
             return True
 
-        parts = line.split()
-        cmd = parts[0].lower()
-        args = parts[1:]
+        cmd, args = self.parse_command_line(line)
+        if not cmd:
+            return True
 
         payload = None
 
@@ -161,7 +199,7 @@ Examples:
             if not args:
                 print("❌ Usage: report_enemy <enemy_id>")
                 return True
-            payload = {"action": "api.report_enemy", "unit_id": args[0]}
+            payload = {"action": "api.report_enemy", "unit_id": clean_unit_ids(args[0])}
         elif cmd in ("terminate", "api.terminate"):
             payload = {"action": "api.terminate"}
         elif cmd in ("ping", "api.ping"):
@@ -170,7 +208,7 @@ Examples:
             if not args:
                 print("❌ Usage: report <unit_id>")
                 return True
-            payload = {"action": "api.report", "unit_id": args[0]}
+            payload = {"action": "api.report", "unit_id": clean_unit_ids(args[0])}
         elif cmd == "move":
             if len(args) < 3:
                 print("❌ Usage: move <unit_ids> <x> <y>")
@@ -181,24 +219,24 @@ Examples:
             except ValueError:
                 print("❌ x and y must be numbers")
                 return True
-            payload = {"action": "api.command_move", "unit_ids": args[0], "x": x, "y": y}
+            payload = {"action": "api.command_move", "unit_ids": clean_unit_ids(args[0]), "x": x, "y": y}
         elif cmd == "attack":
             if len(args) < 2:
                 print("❌ Usage: attack <unit_ids> <target_enemy_id>")
                 return True
-            payload = {"action": "api.command_attack", "unit_ids": args[0], "target_id": args[1]}
+            payload = {"action": "api.command_attack", "unit_ids": clean_unit_ids(args[0]), "target_id": clean_unit_ids(args[1])}
         elif cmd in ("tactic", "set_tactic"):
             if len(args) < 2:
                 print("❌ Usage: tactic <unit_ids> <aggressive|defensive|manual|guard>")
                 return True
-            payload = {"action": "api.command_set_tactic", "unit_ids": args[0], "tactic": args[1]}
+            payload = {"action": "api.command_set_tactic", "unit_ids": clean_unit_ids(args[0]), "tactic": args[1]}
         elif cmd in ("guard", "set_guard"):
             if len(args) < 2:
                 print("❌ Usage: guard <unit_ids> <target_friendly_id>")
                 return True
-            payload = {"action": "api.command_set_guard", "unit_ids": args[0], "target_id": args[1]}
+            payload = {"action": "api.command_set_guard", "unit_ids": clean_unit_ids(args[0]), "target_id": clean_unit_ids(args[1])}
         elif cmd in ("fire", "command_fire"):
-            unit_ids = args[0] if len(args) > 0 else "*"
+            unit_ids = clean_unit_ids(args[0]) if len(args) > 0 else "*"
             direction = args[1] if len(args) > 1 else None
             payload = {"action": "api.command_fire", "unit_ids": unit_ids}
             if direction:
@@ -207,12 +245,12 @@ Examples:
             if len(args) < 3:
                 print("❌ Usage: path <unit_id> <x> <y>")
                 return True
-            payload = {"action": "api.find_path", "unit_id": args[0], "x": float(args[1]), "y": float(args[2])}
+            payload = {"action": "api.find_path", "unit_id": clean_unit_ids(args[0]), "x": float(args[1]), "y": float(args[2])}
         elif cmd in ("resources", "res", "get_resources", "api.get_resources"):
             camp = args[0] if len(args) > 0 else "player"
             payload = {"action": "api.get_resources", "camp": camp}
         elif cmd in ("blocks", "resource_blocks", "list_resource_blocks", "api.list_resource_blocks"):
-            unit_id = args[0] if len(args) > 0 else None
+            unit_id = clean_unit_ids(args[0]) if len(args) > 0 else None
             payload = {"action": "api.list_resource_blocks"}
             if unit_id:
                 payload["unit_id"] = unit_id
@@ -226,9 +264,9 @@ Examples:
             except ValueError:
                 print("❌ col and row must be integer tile coordinates")
                 return True
-            payload = {"action": "api.harvest", "unit_ids": args[0], "col": col, "row": row}
+            payload = {"action": "api.harvest", "unit_ids": clean_unit_ids(args[0]), "col": col, "row": row}
         elif cmd in ("stop_harvest", "command_stop_harvest", "cancel_harvest", "api.stop_harvest"):
-            unit_ids = args[0] if len(args) > 0 else "*"
+            unit_ids = clean_unit_ids(args[0]) if len(args) > 0 else "*"
             payload = {"action": "api.stop_harvest", "unit_ids": unit_ids}
         elif cmd in ("list_converter", "list_converters", "converters", "recipes", "list_recipes", "api.list_converter"):
             payload = {"action": "api.list_converter"}
@@ -242,9 +280,9 @@ Examples:
                 print("❌ Usage: convert <unit_id> <recipe_id> [count]")
                 return True
             count = int(args[2]) if len(args) > 2 else 1
-            payload = {"action": "api.convert", "unit_id": args[0], "recipe_id": args[1], "count": count}
+            payload = {"action": "api.convert", "unit_id": clean_unit_ids(args[0]), "recipe_id": args[1], "count": count}
         elif cmd in ("terminate_convert", "cancel_convert", "clear_convert", "api.terminate_convert"):
-            unit_id = args[0] if len(args) > 0 else None
+            unit_id = clean_unit_ids(args[0]) if len(args) > 0 else None
             payload = {"action": "api.terminate_convert"}
             if unit_id:
                 payload["unit_id"] = unit_id

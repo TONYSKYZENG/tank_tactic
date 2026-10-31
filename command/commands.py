@@ -25,14 +25,14 @@ class BaseCommand(ABC):
             step = 1 if row2 > row1 else -1
             for r in range(row1 + step, row2, step):
                 if 0 <= col1 < game_map.cols and 0 <= r < game_map.rows:
-                    if game_map.get_tile(col1, r) in (TileType.BRICK, TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY):
+                    if game_map.get_tile(col1, r) in (TileType.BRICK, TileType.STEEL, TileType.BASE):
                         return False
             return True
         elif row1 == row2:
             step = 1 if col2 > col1 else -1
             for c in range(col1 + step, col2, step):
                 if 0 <= c < game_map.cols and 0 <= row1 < game_map.rows:
-                    if game_map.get_tile(c, row1) in (TileType.BRICK, TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY):
+                    if game_map.get_tile(c, row1) in (TileType.BRICK, TileType.STEEL, TileType.BASE):
                         return False
             return True
 
@@ -51,7 +51,7 @@ class BaseCommand(ABC):
             c = int(px // tile_size)
             r = int(py // tile_size)
             if 0 <= c < game_map.cols and 0 <= r < game_map.rows:
-                if game_map.get_tile(c, r) in (TileType.BRICK, TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY):
+                if game_map.get_tile(c, r) in (TileType.BRICK, TileType.STEEL, TileType.BASE):
                     return False
         return True
 
@@ -518,7 +518,19 @@ class HarvestCommand(BaseCommand):
         bx2, by2 = bx1 + ts, by1 + ts
 
         pts = []
-        # 1. 瓦片网格常规对齐采样 (适用于尺寸适中战车)
+        # 1. 绝对中心点优先 (cx - S/2, cy - S/2)
+        pts.append((cx - S / 2.0, cy - S / 2.0))
+        pts.append((bx1 + (ts - S) / 2.0, by1 + (ts - S) / 2.0))
+        pts.append((bx1, by1))
+
+        # 2. 从中心向外同心圆密集径向采样 (尽可能靠近中心)
+        for dist_r in [2.0, 4.0, 8.0, 12.0, 16.0, 20.0, 24.0, 32.0, 40.0, 48.0, 64.0, block.harvest_radius]:
+            if dist_r <= block.harvest_radius:
+                for deg in range(0, 360, 20):
+                    rad = math.radians(deg)
+                    pts.append((cx + math.cos(rad) * dist_r - S / 2.0, cy + math.sin(rad) * dist_r - S / 2.0))
+
+        # 3. 瓦片网格常规对齐采样
         r = int(math.ceil(block.harvest_radius / ts)) + 1
         for dr in range(-r, r + 1):
             for dc in range(-r, r + 1):
@@ -528,27 +540,14 @@ class HarvestCommand(BaseCommand):
                     pts.append((col * ts + (ts - S) / 2.0, row * ts + (ts - S) / 2.0))
                     pts.append((col * ts, row * ts))
 
-        # 2. 贴紧资源块外缘平铺采样 (专为基地车 MCV size 44 > ts 36 等大型战车设计，杜绝因向内溢出碰撞障碍而被判定不可通行)
+        # 4. 贴紧资源块外缘平铺采样
         gap = 1.0
         offsets = [0.0, (ts - S) / 2.0, -(S - ts), ts - S]
         for offset in offsets:
-            # 目标左侧紧贴
             pts.append((bx1 - S - gap, by1 + offset))
-            # 目标右侧紧贴
             pts.append((bx2 + gap, by1 + offset))
-            # 目标上方紧贴
             pts.append((bx1 + offset, by1 - S - gap))
-            # 目标下方紧贴
             pts.append((bx1 + offset, by2 + gap))
-
-        # 3. 围绕资源块几何中心的极坐标径向采样
-        min_dist = (ts + S) / 2.0 + 1.0
-        max_dist = block.harvest_radius
-        if min_dist <= max_dist:
-            for dist_r in [min_dist, (min_dist + max_dist) / 2.0, max_dist]:
-                for deg in range(0, 360, 15):
-                    rad = math.radians(deg)
-                    pts.append((cx + math.cos(rad) * dist_r - S / 2.0, cy + math.sin(rad) * dist_r - S / 2.0))
 
         candidates = []
         seen = set()
@@ -563,11 +562,12 @@ class HarvestCommand(BaseCommand):
                     dist_center = math.hypot(tcx - cx, tcy - cy)
                     if dist_center <= block.harvest_radius:
                         dist_to_tank = math.hypot(tx - tank.x, ty - tank.y)
-                        candidates.append((dist_to_tank, tx, ty))
+                        # 核心排序准则：尽可能逼近目标中心 (dist_center 优先升序)
+                        candidates.append((dist_center, dist_to_tank, tx, ty))
 
         if candidates:
-            candidates.sort(key=lambda item: item[0])
-            return candidates[0][1], candidates[0][2]
+            candidates.sort(key=lambda item: (item[0], item[1]))
+            return candidates[0][2], candidates[0][3]
         return None
 
     def execute(self, tank: Tank, physics_engine, game_map: GameMap) -> bool:
@@ -585,39 +585,53 @@ class HarvestCommand(BaseCommand):
             return True
 
         ts = game_map.tile_size
-        # 1. 检查是否已经在开采范围内
-        if block.is_in_harvest_range(tank, ts):
+        cx, cy = block.center(ts)
+
+        # 1. 寻找尽可能靠近目标中心的最佳站立位置
+        dest = self._find_standable_harvest_pos(tank, physics_engine, game_map, block)
+        if not dest:
+            # 若无法找到任何可站立位置，且当前在采集范围内，就地采集
+            if block.is_in_harvest_range(tank, ts):
+                if not tank.is_harvesting or tank.harvest_target != (self.target_col, self.target_row):
+                    tank.start_harvest(self.target_col, self.target_row)
+                return False
+            tank.stop_harvest()
+            return True
+
+        dest_x, dest_y = dest
+        dist_to_dest = math.hypot(tank.x - dest_x, tank.y - dest_y)
+
+        # 2. 如果已经到达最佳位置（误差 4.0 像素以内）
+        if dist_to_dest <= 4.0:
             self.move_subcmd = None
             if not tank.is_harvesting or tank.harvest_target != (self.target_col, self.target_row):
                 tank.start_harvest(self.target_col, self.target_row)
             return False
 
-        # 2. 不在开采范围内：寻路靠近
-        if self.move_subcmd is None:
-            dest = self._find_standable_harvest_pos(tank, physics_engine, game_map, block)
-            if dest:
-                self.move_subcmd = MoveCommand(dest[0], dest[1], tolerance=6.0, auto_clear_path=self.auto_clear_path)
-            else:
-                tank.stop_harvest()
-                return True
+        # 3. 尚未到达最佳中心位置：在途不提前采矿，持续驱动移向目标中心
+        if getattr(tank, "is_harvesting", False):
+            tank.stop_harvest()
 
-        if self.move_subcmd:
-            done = self.move_subcmd.execute(tank, physics_engine, game_map)
+        if self.move_subcmd is None or abs(self.move_subcmd.dest_x - dest_x) > 2.0 or abs(self.move_subcmd.dest_y - dest_y) > 2.0:
+            self.move_subcmd = MoveCommand(dest_x, dest_y, tolerance=3.0, auto_clear_path=self.auto_clear_path)
+
+        done = self.move_subcmd.execute(tank, physics_engine, game_map)
+
+        # 若在移动过程中卡住且无法再靠近中心，但已处于采集范围内，就地开始采集
+        if self.move_subcmd and self.move_subcmd.stuck_frames > 25:
             if block.is_in_harvest_range(tank, ts):
                 self.move_subcmd = None
                 tank.start_harvest(self.target_col, self.target_row)
                 return False
-            if done:
-                self.move_subcmd = None
-                if block.is_in_harvest_range(tank, ts):
-                    tank.start_harvest(self.target_col, self.target_row)
-                    return False
-                else:
-                    dest = self._find_standable_harvest_pos(tank, physics_engine, game_map, block)
-                    if dest:
-                        self.move_subcmd = MoveCommand(dest[0], dest[1], tolerance=6.0, auto_clear_path=self.auto_clear_path)
-                    else:
-                        tank.stop_harvest()
-                        return True
+
+        # 检查是否已达到目标点
+        if done or math.hypot(tank.x - dest_x, tank.y - dest_y) <= 4.0:
+            self.move_subcmd = None
+            if block.is_in_harvest_range(tank, ts):
+                tank.start_harvest(self.target_col, self.target_row)
+                return False
+            else:
+                tank.stop_harvest()
+                return True
 
         return False

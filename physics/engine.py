@@ -170,7 +170,7 @@ class PhysicsEngine:
             for col in range(col_start, col_end + 1):
                 tile = self.game_map.get_tile(col, row)
                 # 若坦克具备碾压砖块能力，普通砖块不作为阻碍
-                blocks = (TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY) if can_crush else (TileType.BRICK, TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY)
+                blocks = (TileType.STEEL, TileType.BASE) if can_crush else (TileType.BRICK, TileType.STEEL, TileType.BASE)
                 if tile in blocks:
                     tile_rect = Rect(col * tile_size, row * tile_size, tile_size, tile_size)
                     if tank_rect.collides_with(tile_rect):
@@ -419,7 +419,7 @@ class PhysicsEngine:
             for row in range(row_start, row_end + 1):
                 for col in range(col_start, col_end + 1):
                     tile = self.game_map.get_tile(col, row)
-                    if tile in (TileType.BRICK, TileType.STEEL, TileType.BASE, TileType.DARK_MATTER, TileType.ALLOY):
+                    if tile in (TileType.BRICK, TileType.STEEL, TileType.BASE):
                         tile_rect = Rect(col * tile_size, row * tile_size, tile_size, tile_size)
                         if bullet_rect.collides_with(tile_rect):
                             hit_obstacle = True

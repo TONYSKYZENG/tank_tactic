@@ -678,5 +678,90 @@ class TestGameAPI(unittest.TestCase):
         self.assertIsNot(first_move_cmd, third_move_cmd)
         self.assertEqual(third_move_cmd.dest_x, 400.0)
 
+    def test_harvest_cli_and_api_bracket_unit_ids(self):
+        """测试 CLI 客户端与 API 控制器对带方括号单位 ID 的正确解析与调度 (防止截断为 'p')"""
+        from tests.cli_client import clean_unit_ids, TanksConsoleClient
+        from resource.models import ResourceBlock
+
+        # 1. 验证 cli_client 辅助函数
+        self.assertEqual(clean_unit_ids("[player_alpha]"), "player_alpha")
+        self.assertEqual(clean_unit_ids("[player_alpha, player_bravo]"), "player_alpha,player_bravo")
+        self.assertEqual(clean_unit_ids("player_alpha"), "player_alpha")
+
+        cmd, args = TanksConsoleClient.parse_command_line("harvest [player_alpha] 5 5")
+        self.assertEqual(cmd, "harvest")
+        self.assertEqual(args, ["[player_alpha]", "5", "5"])
+        self.assertEqual(clean_unit_ids(args[0]), "player_alpha")
+
+        cmd2, args2 = TanksConsoleClient.parse_command_line("harvest [player_alpha, player_bravo] 5 5")
+        self.assertEqual(cmd2, "harvest")
+        self.assertEqual(args2, ["[player_alpha, player_bravo]", "5", "5"])
+        self.assertEqual(clean_unit_ids(args2[0]), "player_alpha,player_bravo")
+
+        # 2. 在 mock 环境中注册资源块 (5, 5)
+        blk = ResourceBlock(col=5, row=5, resource_type="dark_matter", current_amount=500.0, initial_amount=500.0, regen_rate=1.0)
+        self.mock_game.resource_manager.blocks.append(blk)
+        self.mock_game.resource_manager._block_by_pos[(5, 5)] = blk
+
+        # 3. 验证通过 API 传入 "[player_alpha]" (字符串带括号) 正常分发，而非报错找不到单位 'p' 或 '['
+        req = {"action": "api.harvest", "unit_ids": "[player_alpha]", "col": 5, "row": 5}
+        resp = json.loads(self.controller.handle_request(json.dumps(req)))
+        self.assertEqual(resp["status"], "ok")
+        self.assertEqual(resp["unit_id"], "player_alpha")
+        self.assertIn("player_alpha", resp["unit_ids"])
+
+        # 验证 stop_harvest 同样支持带方括号单位参数
+        stop_req = {"action": "api.stop_harvest", "unit_ids": "[player_alpha]"}
+        stop_resp = json.loads(self.controller.handle_request(json.dumps(stop_req)))
+        self.assertEqual(stop_resp["status"], "ok")
+
+    def test_harvest_center_seeking_movement(self):
+        """测试采矿指令优先移动到目标资源块几何中心再开始采集的逻辑"""
+        from resource.models import ResourceBlock
+        from command.commands import HarvestCommand
+        import math
+
+        ts = self.mock_game.game_map.tile_size
+        col, row = 8, 8
+        blk = ResourceBlock(col=col, row=row, resource_type="dark_matter", current_amount=500.0, initial_amount=500.0, regen_rate=1.0)
+        self.mock_game.resource_manager.blocks.append(blk)
+        self.mock_game.resource_manager._block_by_pos[(col, row)] = blk
+
+        # 让 player_alpha 位于 (100, 100)，资源块 (8, 8) 中心为 (8.5 * 32, 8.5 * 32) = (272, 272)
+        self.mock_game.p1.x = 100.0
+        self.mock_game.p1.y = 100.0
+
+        h_cmd = HarvestCommand(col, row, self.mock_game.resource_manager)
+        dest = h_cmd._find_standable_harvest_pos(self.mock_game.p1, self.mock_game.physics_engine, self.mock_game.game_map, blk)
+        self.assertIsNotNone(dest)
+
+        # 验证计算出的站立点中心与资源块几何中心完全重合
+        cx, cy = blk.center(ts)
+        tank_cx = dest[0] + self.mock_game.p1.size / 2.0
+        tank_cy = dest[1] + self.mock_game.p1.size / 2.0
+        self.assertAlmostEqual(tank_cx, cx, delta=1.0)
+        self.assertAlmostEqual(tank_cy, cy, delta=1.0)
+
+        # 下达开采指令
+        self.mock_game.command_dispatcher.issue_harvest([self.mock_game.p1], col, row, self.mock_game.resource_manager)
+
+        # 推进仿真直到到达中心
+        for _ in range(120):
+            cmd = self.mock_game.command_dispatcher.tank_commands.get(self.mock_game.p1.id)
+            if cmd:
+                cmd.execute(self.mock_game.p1, self.mock_game.physics_engine, self.mock_game.game_map)
+            self.mock_game.resource_manager.update(0.016)
+            self.mock_game.resource_manager.update_harvest([self.mock_game.p1], 0.016, ts)
+            if self.mock_game.p1.is_harvesting:
+                break
+
+        # 验证已经就位且处于采集状态
+        self.assertTrue(self.mock_game.p1.is_harvesting)
+        cur_cx = self.mock_game.p1.x + self.mock_game.p1.size / 2.0
+        cur_cy = self.mock_game.p1.y + self.mock_game.p1.size / 2.0
+        dist_to_center = math.hypot(cur_cx - cx, cur_cy - cy)
+        # 验证与目标中心的距离在极小误差范围 (<= 4.0 像素) 内
+        self.assertLessEqual(dist_to_center, 4.0)
+
 if __name__ == "__main__":
     unittest.main()

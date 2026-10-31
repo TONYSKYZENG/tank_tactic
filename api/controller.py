@@ -666,11 +666,12 @@ class GameAPIController:
             return all_player_tanks
 
         if isinstance(unit_ids_param, str):
-            ids = [i.strip() for i in unit_ids_param.split(",") if i.strip()]
+            cleaned = unit_ids_param.strip("[] \t\r\n")
+            ids = [i.strip("[] \t\r\n") for i in cleaned.replace(",", " ").split() if i.strip("[] \t\r\n")]
         elif isinstance(unit_ids_param, (list, tuple)):
-            ids = [str(i).strip() for i in unit_ids_param if str(i).strip()]
+            ids = [str(i).strip("[] \t\r\n") for i in unit_ids_param if str(i).strip("[] \t\r\n")]
         else:
-            ids = [str(unit_ids_param).strip()]
+            ids = [str(unit_ids_param).strip("[] \t\r\n")]
 
         if "*" in ids or "all" in ids:
             return all_player_tanks
@@ -1367,22 +1368,12 @@ class GameAPIController:
         if not physics:
             return {"status": "error", "error": "Physics engine not available"}
 
-        unit_id = params.get("unit_id") or params.get("_caller_unit_id")
-        if not unit_id:
-            unit_ids = params.get("unit_ids", [])
-            unit_id = unit_ids[0] if unit_ids else None
+        unit_param = params.get("unit_id") or params.get("unit_ids") or params.get("_caller_unit_id")
+        tanks = self._get_target_tanks(unit_param)
+        if not tanks:
+            return {"status": "error", "error": f"No valid alive units found for '{unit_param}'"}
 
-        if not unit_id:
-            return {"status": "error", "error": "Missing 'unit_id' parameter"}
-
-        target_tank = None
-        for t in physics.player_tanks + physics.enemy_tanks:
-            if t.id == unit_id:
-                target_tank = t
-                break
-
-        if not target_tank or not target_tank.alive:
-            return {"status": "error", "error": f"Unit '{unit_id}' not found or is dead"}
+        first_tank = tanks[0]
 
         game_map = getattr(self.game_context, "game_map", None)
         tile_size = game_map.tile_size if game_map else 32
@@ -1403,18 +1394,20 @@ class GameAPIController:
             return {"status": "error", "error": f"No resource block found at ({col}, {row})"}
 
         all_tanks = physics.player_tanks + physics.enemy_tanks
-        in_range = block.is_in_harvest_range(target_tank, tile_size)
-        is_excl = block.is_exclusive(target_tank.camp, all_tanks, tile_size)
-
-        target_tank.start_harvest(col, row)
+        in_range = block.is_in_harvest_range(first_tank, tile_size)
+        is_excl = block.is_exclusive(first_tank.camp, all_tanks, tile_size)
 
         dispatcher = getattr(self.game_context, "command_dispatcher", None)
         if dispatcher:
-            dispatcher.issue_harvest([target_tank], col, row, res_mgr)
+            dispatcher.issue_harvest(tanks, col, row, res_mgr)
+        else:
+            for t in tanks:
+                t.start_harvest(col, row)
 
         return {
             "status": "ok",
-            "unit_id": unit_id,
+            "unit_id": first_tank.id,
+            "unit_ids": [t.id for t in tanks],
             "harvest_target": [col, row],
             "resource_type": block.resource_type,
             "in_range": in_range,
@@ -1428,17 +1421,18 @@ class GameAPIController:
             return {"status": "error", "error": "Physics engine not available"}
 
         dispatcher = getattr(self.game_context, "command_dispatcher", None)
-        unit_id = params.get("unit_id") or params.get("_caller_unit_id")
-        if unit_id:
-            for t in physics.player_tanks + physics.enemy_tanks:
-                if t.id == unit_id:
-                    t.stop_harvest()
-                    if dispatcher and t.id in dispatcher.tank_commands:
-                        from command.commands import HarvestCommand
-                        if isinstance(dispatcher.tank_commands[t.id], HarvestCommand):
-                            dispatcher.tank_commands[t.id] = None
-                    return {"status": "ok", "message": f"Harvest stopped for unit '{unit_id}'"}
-            return {"status": "error", "error": f"Unit '{unit_id}' not found"}
+        unit_param = params.get("unit_id") or params.get("unit_ids") or params.get("_caller_unit_id")
+        if unit_param and str(unit_param).strip() != "*":
+            targets = self._get_target_tanks(unit_param)
+            if not targets:
+                return {"status": "error", "error": f"No valid alive units found for '{unit_param}'"}
+            for t in targets:
+                t.stop_harvest()
+                if dispatcher and t.id in dispatcher.tank_commands:
+                    from command.commands import HarvestCommand
+                    if isinstance(dispatcher.tank_commands[t.id], HarvestCommand):
+                        dispatcher.tank_commands[t.id] = None
+            return {"status": "ok", "message": f"Harvest stopped for units: {[t.id for t in targets]}"}
         else:
             for t in physics.player_tanks + physics.enemy_tanks:
                 t.stop_harvest()

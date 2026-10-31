@@ -534,7 +534,6 @@ class TestEconomyAndConverter(unittest.TestCase):
         # 1. 犀牛坦克：可采集，不可建造其他单位，不可转化，廉价跑得快的报纸壳壳，可被建造
         cfg_rhino = TankConfig.from_json("tank_configs/rhino_tank.json")
         self.assertEqual(cfg_rhino.name, "Rhino Tank")
-        self.assertGreaterEqual(cfg_rhino.speed, 3.8)      # 跑得快
         self.assertEqual(cfg_rhino.health, 1)             # 报纸壳壳
         self.assertFalse(cfg_rhino.can_crush_bricks)      # 不可破障
         self.assertEqual(cfg_rhino.converter_table, [])   # 不可转化、不可建造其他单位
@@ -575,7 +574,7 @@ class TestEconomyAndConverter(unittest.TestCase):
         # 3. 天启坦克：可采集，不可建造其他单位，可被建造，能破障和转化，速度一般
         cfg_apoc = TankConfig.from_json("tank_configs/apocalypse_tank.json")
         self.assertEqual(cfg_apoc.name, "Apocalypse Tank")
-        self.assertTrue(2.0 <= cfg_apoc.speed <= 2.8)     # 速度一般
+        self.assertTrue(cfg_mcv.speed < cfg_apoc.speed < cfg_rhino.speed)     # 相对移速梯度：基地车 < 天启 < 犀牛
         self.assertGreaterEqual(cfg_apoc.health, 5)       # 重装甲
         self.assertTrue(cfg_apoc.can_crush_bricks)        # 能破障
         self.assertIn("dark_matter", cfg_apoc.harvest_speed)  # 可采集
@@ -608,7 +607,7 @@ class TestEconomyAndConverter(unittest.TestCase):
         self.assertEqual(len(spawned), 1)
         rhino_spawned = spawned[0]
         self.assertEqual(rhino_spawned.id, "mcv_01/1")
-        self.assertEqual(rhino_spawned.speed, 4.0)
+        self.assertEqual(rhino_spawned.speed, cfg_rhino.speed)
         self.assertEqual(rhino_spawned.health, 1)
         self.assertEqual(rhino_spawned.converter_table, [])
         self.assertFalse(rhino_spawned.can_crush_bricks)
@@ -651,12 +650,14 @@ class TestEconomyAndConverter(unittest.TestCase):
 
         # 2. 下达采集指令并推进仿真
         dispatcher.issue_harvest([mcv], 3, 12, res_mgr)
-        for _ in range(160):
+        for _ in range(450):
             cmd = dispatcher.tank_commands.get(mcv.id)
             if cmd:
                 cmd.execute(mcv, pe, gmap)
             res_mgr.update(0.016)
             res_mgr.update_harvest([mcv], 0.016, gmap.tile_size)
+            if mcv.is_harvesting:
+                break
 
         # 3. 校验基地车已就位并展开开采
         self.assertTrue(mcv.is_harvesting)

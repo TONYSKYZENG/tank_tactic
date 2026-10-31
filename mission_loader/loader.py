@@ -23,7 +23,8 @@ class MissionLoader:
             config_file=player_data.get("config_file", "tank_configs/player_tank.json"),
             spawn=SpawnPoint(x=player_spawn["x"], y=player_spawn["y"]),
             vision_size=float(player_data.get("vision_size", 288.0)),
-            ammo=int(player_data.get("ammo", -1))
+            ammo=int(player_data.get("ammo", -1)),
+            visibility=float(player_data.get("visibility", 1.0))
         )
 
         # 2. 我方多车编队列表 player_units
@@ -36,7 +37,8 @@ class MissionLoader:
                     config_file=p.get("config_file", "tank_configs/player_tank.json"),
                     spawn=SpawnPoint(x=pspawn["x"], y=pspawn["y"]),
                     vision_size=float(p.get("vision_size", 288.0)),
-                    ammo=int(p.get("ammo", -1))
+                    ammo=int(p.get("ammo", -1)),
+                    visibility=float(p.get("visibility", 1.0))
                 ))
         else:
             player_units = [single_player_info]

@@ -50,6 +50,14 @@ tanks_tactic/
 │   └── static/
 │       └── index.html            # 全息雷达上帝小地图与全量敌我属性表格
 │
+├── api/                          # 🌐 网络 API 模块 (WebSocket / Raw TCP / UDP 探针)
+│   ├── __init__.py
+│   ├── controller.py             # 核心 API 指令调度器 (pause/resume/is_success/report 等)
+│   ├── tcp_server.py             # 原始 TCP/IP 纯文本 JSON 协议服务 (默认 8091)
+│   ├── ws_server.py              # WebSocket 纯文本 JSON 协议服务 (默认 8090)
+│   ├── udp_beacon.py             # UDP 心跳广播 ('我在这里') 与直接纯文本 JSON 响应 (默认 8092)
+│   └── server.py                 # 统一 API 管理中枢 (APIServerManager)
+│
 ├── tank_configs/                 # 🛡️ 战车与防御塔配置 (JSON)
 │   ├── tower_radar.json          # 🗼 纯视野雷达哨所
 │   ├── tower_cannon.json         # 🗼 重型加农防御炮台
@@ -73,8 +81,15 @@ tanks_tactic/
 ├── maps/                         # 💾 纯地图存档文件夹 (JSON)
 ├── mission_loader/               # 📋 任务加载模块
 ├── missions/                     # 🎯 任务存档文件夹 (JSON)
-└── physics/                      # ⚙️ 物理引擎 (防御塔/弹药补给/视线迷雾)
+├── physics/                      # ⚙️ 物理引擎 (防御塔/弹药补给/视线迷雾)
+└── tests/                        # 🧪 测试与客户端套件
+    ├── __init__.py
+    ├── cli_client.py             # 💻 交互式命令行控制台程序 (TCP/IP)
+    ├── test_conditions.py        # 胜负条件系统自动化单元测试
+    └── test_api.py               # 网络 API 与套接字端到端自动化测试
 ```
+
+> 📖 **API 纯英文完整文档参见**：[api/README.md](file:///Users/xianzhizeng/Documents/projects/tanks_tactic/api/README.md)
 
 ---
 
@@ -86,6 +101,9 @@ tanks_tactic/
 | :--- | :--- | :--- |
 | **全知战术监视器 (辅助 WebUI)** | **`http://0.0.0.0:8088`** | **永远在线、只读不可操控**。上帝视角透视全图、无视迷雾监控全部敌我单位全部位置与全部实时属性。 |
 | **操作端 Web VNC (需加 `--web`)** | **`http://localhost:8080`** | **可交互操控**。浏览器端 RTS 鼠标拉框、右键指令与键盘直接微操驾驶。 |
+| **WebSocket 网络 API** | **`ws://0.0.0.0:8090`** | **双向 JSON 文本 API**，可编程控制暂停、继续、指令下发、属性报告等。 |
+| **Raw TCP/IP 原始网络 API** | **`tcp://0.0.0.0:8091`** | **纯文本换行 JSON 协议**，支持任何编程语言 socket/netcat 直连交互。 |
+| **UDP 探针与无连接 API** | **`udp://0.0.0.0:8092`** | **上线广播 '我在这里'**，支持网络自动服务发现与单包无连接纯文本 JSON 请求。 |
 | **本地桌面视窗 (默认模式)** | 本地 PyQt5 窗口 | **本地原生视窗**，直接在系统桌面以原生手感游玩。 |
 
 ---
@@ -188,6 +206,124 @@ python3 tanks.py --monitor-host 0.0.0.0 --monitor-port 9999
   }
 }
 ```
+
+---
+
+## 🔌 纯文本 JSON 网络 API 调用规范 (`api/`)
+
+游戏在启动时默认开启三合一网络 API 接口，所有协议均采用**纯文本 JSON** 进行交互：
+- **WebSocket**: `ws://0.0.0.0:8090`
+- **原始 TCP/IP**: `tcp://0.0.0.0:8091`（发送以 `\n` 分隔的 JSON 字符串）
+- **UDP 探针与无连接 API**: `udp://0.0.0.0:8092`
+  - 服务上线时将自动向局域网广播上线数据包：`{"service":"tanks_tactic_api","status":"online","message":"我在这里",...}`；
+  - 同样支持直接向 UDP 端口发送纯文本 JSON 请求并接收 JSON 应答。
+
+### 核心接口清单：
+
+#### 1. `api.pause()` 与 `api.resume()`
+- **功能**：暂停或恢复游戏物理与战术引擎的循环。
+- **请求格式**：
+  ```json
+  {"action": "api.pause"}
+  ```
+- **响应**：`{"status": "ok", "paused": true, "message": "Engine paused"}`
+
+#### 2. `api.is_success()`
+- **功能**：判断当前战役是否达成任务中配置的获胜条件并返回。
+- **请求格式**：
+  ```json
+  {"action": "api.is_success"}
+  ```
+- **响应**：
+  ```json
+  {
+    "status": "ok",
+    "is_success": true,
+    "game_over": false,
+    "victory_desc": "((单位 [core_supply_base] 存活超过 30.0s 且 ...))"
+  }
+  ```
+
+#### 3. `api.terminate()` 与 `api.restart()`
+- **功能**：
+  - `api.terminate`：终结所有引擎、网络后台服务并退出应用；
+  - `api.restart`：重置战局、重载地图与出生点、重新开始游戏模拟。
+- **请求格式**：
+  ```json
+  {"action": "api.terminate"}
+  {"action": "api.restart"}
+  ```
+
+#### 4. `api.list_current_unit_id` 与 `api.list_enemy_curr`
+- **功能**：
+  - `api.list_current_unit_id`：返回当前存活的所有己方单位 ID，以**逗号隔开**（结合 `visibility` 概率过滤）；
+  - `api.list_enemy_curr`：列出当前存活的敌方单位 ID（以逗号隔开）：
+    - **上帝视角模式 (`god_mode: true`)**：无视迷雾透视全图敌军；
+    - **我方视野探测模式 (`god_mode: false`)**：仅汇总所有存活我方单位视线，在视线范围内的敌军按其自身辨识度 `visibility` 概率加入列表。
+- **请求格式**：
+  ```json
+  {"action": "api.list_current_unit_id"}
+  {"action": "api.list_enemy_curr", "god_mode": false}
+  ```
+- **响应示例**：
+  ```json
+  {
+    "status": "ok",
+    "unit_ids": "e_patrol_1,e_fast_1",
+    "count": 2,
+    "mode": "vision",
+    "total_enemies": 3
+  }
+  ```
+
+#### 5. `api.command_move` / `attack` / `set_tactic` / `set_guard`
+- **功能**：按照指定 `unit_ids` 批量对己方单位下发控制指令。
+- **批量移动**：
+  ```json
+  {"action": "api.command_move", "unit_ids": "player_alpha,player_bravo", "x": 200, "y": 300}
+  ```
+- **批量集火攻击**：
+  ```json
+  {"action": "api.command_attack", "unit_ids": ["player_alpha"], "target_id": "e_hunter_1"}
+  ```
+- **批量设置战术**：
+  ```json
+  {"action": "api.command_set_tactic", "unit_ids": "player_alpha", "tactic": "defensive"}
+  ```
+- **批量护卫指定己方单位**：
+  ```json
+  {"action": "api.command_set_guard", "unit_ids": "player_alpha", "target_id": "core_supply_base"}
+  ```
+
+#### 6. `api.report`
+- **功能**：令指定 `unit_id` 的己方单位汇报所有属性（战术、弹药、速度、HP、位置等）。
+- **请求格式**：
+  ```json
+  {"action": "api.report", "unit_id": "player_alpha"}
+  ```
+- **响应**：
+  ```json
+  {
+    "status": "ok",
+    "report": {
+      "id": "player_alpha",
+      "alive": true,
+      "tactic": "guard_unit",
+      "ammo": 20,
+      "max_ammo": 20,
+      "speed": 3.0,
+      "hp": 2,
+      "max_hp": 2,
+      "x": 224.0,
+      "y": 448.0,
+      "direction": "UP",
+      "visibility": 1.0,
+      "vision_size": 260.0,
+      "is_tower": false,
+      "auto_clear": false
+    }
+  }
+  ```
 
 ---
 

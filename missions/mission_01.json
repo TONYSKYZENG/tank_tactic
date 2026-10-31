@@ -51,7 +51,8 @@
         "y": 14
       },
       "vision_size": 260,
-      "ammo": 20
+      "ammo": 20,
+      "visibility": 1.0
     },
     {
       "id": "player_bravo",
@@ -61,7 +62,8 @@
         "y": 14
       },
       "vision_size": 260,
-      "ammo": 20
+      "ammo": 20,
+      "visibility": 0.7
     }
   ],
   "enemies": [

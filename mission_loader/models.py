@@ -13,6 +13,7 @@ class PlayerMissionInfo:
     id: str = "player_1"
     vision_size: float = 280.0  # 视线正方形边长，-1 为全图视野
     ammo: int = -1              # 弹药数量，-1 为无限弹药
+    visibility: float = 1.0     # 辨识度：1.0 永远可见，0.0~1.0 每 tick/查询 发现概率
 
 @dataclass
 class EnemyMissionInfo:

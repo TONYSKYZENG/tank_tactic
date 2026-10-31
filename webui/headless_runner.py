@@ -58,6 +58,7 @@ class HeadlessGameRunner(QObject):
 
         self.game_over = False
         self.game_victory = False
+        self.is_paused = False
 
         self._setup_mission_entities()
         self._setup_conditions()
@@ -67,6 +68,12 @@ class HeadlessGameRunner(QObject):
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._step)
+
+    def pause(self):
+        self.is_paused = True
+
+    def resume(self):
+        self.is_paused = False
 
     def _setup_conditions(self):
         self.condition_ctx = ConditionContext(self.physics_engine, self.game_map)
@@ -114,7 +121,7 @@ class HeadlessGameRunner(QObject):
                 tank_id=p_info.id,
                 vision_size=p_info.vision_size,
                 ammo=p_info.ammo,
-                visibility=1.0,
+                visibility=getattr(p_info, "visibility", 1.0),
                 is_tower=cfg.is_tower,
                 can_attack=cfg.can_attack,
                 tower_type=cfg.tower_type,
@@ -418,7 +425,7 @@ class HeadlessGameRunner(QObject):
         return bytes(buffer.data())
 
     def _step(self):
-        if not self.game_over and not self.game_victory:
+        if not self.game_over and not self.game_victory and not self.is_paused:
             self.condition_ctx.update(0.016)
 
             has_manual_input = self._process_micro_tank_input()

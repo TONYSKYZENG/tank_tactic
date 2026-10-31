@@ -1,0 +1,475 @@
+import json
+import random
+import logging
+from typing import Dict, Any, List, Optional, Callable
+from command.tactics_mode import TacticMode
+
+logger = logging.getLogger("GameAPI")
+
+class GameAPIController:
+    """
+    网络 API 核心控制器：
+    负责解析外部 JSON 协议，调用物理引擎、编组与战术调度器执行控制与查询。
+    """
+
+    def __init__(self, game_context, termination_handler: Optional[Callable] = None):
+        """
+        :param game_context: 游戏主上下文（MainWindow.canvas 或 HeadlessGameRunner），
+                             提供 physics_engine, command_dispatcher, condition_ctx,
+                             victory_condition, defeat_condition 等对象
+        :param termination_handler: 外部终结引擎回调
+        """
+        self.game_context = game_context
+        self.termination_handler = termination_handler
+
+    def handle_request(self, raw_data: str) -> str:
+        """接收纯文本 JSON 请求并返回纯文本 JSON 响应"""
+        if not raw_data or not raw_data.strip():
+            return json.dumps({"status": "error", "error": "Empty request"}, ensure_ascii=False)
+
+        try:
+            payload = json.loads(raw_data)
+        except Exception as e:
+            return json.dumps({"status": "error", "error": f"Invalid JSON format: {str(e)}"}, ensure_ascii=False)
+
+        if not isinstance(payload, dict):
+            return json.dumps({"status": "error", "error": "Request payload must be a JSON object"}, ensure_ascii=False)
+
+        # 提取操作指令 (兼容 action, method, cmd 等字段)
+        action = payload.get("action") or payload.get("method") or payload.get("cmd") or ""
+        action = str(action).strip().lower()
+
+        # 规范化：去除 "api." 前缀
+        if action.startswith("api."):
+            action = action[4:]
+
+        params = payload.get("params")
+        if not isinstance(params, dict):
+            # 若未提供 params 对象，将顶层 payload 本身作为参数字典
+            params = payload
+
+        req_id = payload.get("id")
+
+        try:
+            result = self._dispatch_action(action, params)
+            if req_id is not None:
+                result["id"] = req_id
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as e:
+            logger.exception("Error executing API action: %s", action)
+            err_resp = {"status": "error", "error": str(e)}
+            if req_id is not None:
+                err_resp["id"] = req_id
+            return json.dumps(err_resp, ensure_ascii=False)
+
+    def _dispatch_action(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        # 1. 暂停 / 继续引擎
+        if action == "pause":
+            return self.pause(params)
+        elif action == "resume":
+            return self.resume(params)
+
+        # 2. 判断胜利条件
+        elif action in ("is_success", "is_victory", "success"):
+            return self.is_success(params)
+
+        # 3. 终结引擎与后台
+        elif action in ("terminate", "quit", "exit", "shutdown"):
+            return self.terminate(params)
+        elif action in ("restart", "reset", "reload"):
+            return self.restart(params)
+
+        # 4. 列出当前存活己方单位 ID (逗号隔开，带辨识度 visibility 概率过滤)
+        elif action in ("list_current_unit_id", "list_units", "list_player_units"):
+            return self.list_current_unit_id(params)
+        elif action in ("list_enemy_curr", "list_enemies", "list_enemy"):
+            return self.list_enemy_curr(params)
+
+        # 5. 批量指令操作
+        elif action in ("command_move", "move"):
+            return self.command_move(params)
+        elif action in ("command_attack", "attack"):
+            return self.command_attack(params)
+        elif action in ("command_set_tactic", "set_tactic", "tactic"):
+            return self.command_set_tactic(params)
+        elif action in ("command_set_guard", "set_guard", "guard"):
+            return self.command_set_guard(params)
+
+        # 6. 查询单位完整属性报告
+        elif action in ("report", "unit_report", "get_status"):
+            return self.report(params)
+
+        # 辅助探针
+        elif action in ("ping", "hello"):
+            return {"status": "ok", "message": "pong"}
+        elif action in ("discovery", "whoami"):
+            return {"status": "ok", "message": "我在这里"}
+
+        else:
+            return {"status": "error", "error": f"Unknown action: '{action}'"}
+
+    # ================= 1. api.pause() / api.resume() =================
+
+    def pause(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """暂停引擎运行"""
+        if hasattr(self.game_context, "pause"):
+            self.game_context.pause()
+        elif hasattr(self.game_context, "is_paused"):
+            self.game_context.is_paused = True
+        return {"status": "ok", "paused": True, "message": "Engine paused"}
+
+    def resume(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """恢复引擎运行"""
+        if hasattr(self.game_context, "resume"):
+            self.game_context.resume()
+        elif hasattr(self.game_context, "is_paused"):
+            self.game_context.is_paused = False
+        return {"status": "ok", "paused": False, "message": "Engine resumed"}
+
+    # ================= 2. api.is_success() =================
+
+    def is_success(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """判断是否达成获胜条件并返回"""
+        condition_ctx = getattr(self.game_context, "condition_ctx", None)
+        victory_cond = getattr(self.game_context, "victory_condition", None)
+        defeat_cond = getattr(self.game_context, "defeat_condition", None)
+
+        is_succ = False
+        if victory_cond and condition_ctx:
+            is_succ = victory_cond.evaluate(condition_ctx)
+
+        game_over = getattr(self.game_context, "game_over", False)
+        game_victory = getattr(self.game_context, "game_victory", False) or is_succ
+
+        return {
+            "status": "ok",
+            "is_success": game_victory,
+            "game_over": game_over,
+            "victory_desc": victory_cond.get_description() if victory_cond else "全歼敌军",
+            "defeat_desc": defeat_cond.get_description() if defeat_cond else "我方部队覆灭"
+        }
+
+    # ================= 3. api.terminate() =================
+
+    def terminate(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """终结所有的引擎和后台"""
+        if self.termination_handler:
+            self.termination_handler()
+        elif hasattr(self.game_context, "stop"):
+            self.game_context.stop()
+
+        return {"status": "ok", "message": "Terminating all engines and background services..."}
+
+    def restart(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """重置战局并重新启动游戏引擎"""
+        if hasattr(self.game_context, "restart"):
+            self.game_context.restart()
+            return {"status": "ok", "message": "Game restarted successfully"}
+        return {"status": "error", "error": "Game context does not support restart"}
+
+    # ================= 4. api.list_current_unit_id / api.list_enemy_curr =================
+
+    def list_current_unit_id(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        返回当前还存活的所有己方单位 ID，以逗号隔开。
+        并对己方单位启用辨识度 visibility，对部分存活单位有概率 list 不到。
+        """
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        visible_ids = []
+        for tank in physics.player_tanks:
+            if tank.alive:
+                vis = getattr(tank, "visibility", 1.0)
+                # 辨识度判定：1.0 必能被列出；0.0~1.0 按概率列出
+                if vis >= 1.0 or random.random() < vis:
+                    visible_ids.append(tank.id)
+
+        unit_ids_str = ",".join(visible_ids)
+        return {
+            "status": "ok",
+            "unit_ids": unit_ids_str,
+            "count": len(visible_ids)
+        }
+
+    def list_enemy_curr(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        列出当前存活敌军单位 ID（以逗号隔开）：
+        - 上帝视角模式 (god_mode=True 或 mode='god'):
+          无视战争迷雾与视野限制，直接列出全部存活敌军 ID。
+        - 我方视野汇总模式 (god_mode=False，默认模式):
+          汇总当前所有存活我方单位的视线范围 (正方形视界)；
+          若敌军处于任一我方单位视线范围内，再根据敌军的 visibility (辨识度) 概率决定是否添加进 list。
+        """
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        # 检查是否开启上帝视角模式
+        mode_param = str(params.get("mode", "")).lower().strip()
+        god_mode = bool(
+            params.get("god_mode", False) or
+            params.get("all", False) or
+            mode_param in ("god", "all", "cheat")
+        )
+
+        alive_enemies = [e for e in physics.enemy_tanks if e.alive]
+
+        # 1. 上帝视角：直接列出全部存活敌军
+        if god_mode:
+            enemy_ids = [e.id for e in alive_enemies]
+            return {
+                "status": "ok",
+                "unit_ids": ",".join(enemy_ids),
+                "count": len(enemy_ids),
+                "mode": "god",
+                "total_enemies": len(alive_enemies)
+            }
+
+        # 2. 视野与迷雾探测模式
+        has_full_vision = any(t.vision_size < 0 for t in physics.player_tanks if t.alive)
+        fog_enabled = getattr(physics, "fog_of_war_enabled", True)
+        sight_rects = physics.get_player_sight_rects() if (fog_enabled and not has_full_vision) else []
+
+        spotted_enemy_ids = []
+        for enemy in alive_enemies:
+            # 判定是否在任一存活我方单位视线内
+            if not fog_enabled or has_full_vision:
+                in_sight = True
+            else:
+                in_sight = any(enemy.rect.collides_with(sr) for sr in sight_rects)
+
+            if in_sight:
+                vis = getattr(enemy, "visibility", 1.0)
+                # 按照视野中敌方单位的可见度随机判定是否添加进 list
+                if vis >= 1.0 or random.random() < vis:
+                    spotted_enemy_ids.append(enemy.id)
+
+        return {
+            "status": "ok",
+            "unit_ids": ",".join(spotted_enemy_ids),
+            "count": len(spotted_enemy_ids),
+            "mode": "vision",
+            "total_enemies": len(alive_enemies)
+        }
+
+    # ================= 5. api.command_* 批量指令 =================
+
+    def _get_target_player_tanks(self, unit_ids_param: Any) -> List[Any]:
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return []
+
+        all_player_tanks = [t for t in physics.player_tanks if t.alive]
+
+        if not unit_ids_param:
+            return all_player_tanks
+
+        if isinstance(unit_ids_param, str):
+            ids = [i.strip() for i in unit_ids_param.split(",") if i.strip()]
+        elif isinstance(unit_ids_param, (list, tuple)):
+            ids = [str(i).strip() for i in unit_ids_param if str(i).strip()]
+        else:
+            ids = [str(unit_ids_param).strip()]
+
+        if "*" in ids or "all" in ids:
+            return all_player_tanks
+
+        target_set = set(ids)
+        return [t for t in all_player_tanks if t.id in target_set]
+
+    def command_move(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """按照 ID 批量移动己方单位到 (x, y)"""
+        dispatcher = getattr(self.game_context, "command_dispatcher", None)
+        if not dispatcher:
+            return {"status": "error", "error": "Command dispatcher not available"}
+
+        tanks = self._get_target_player_tanks(params.get("unit_ids"))
+        if not tanks:
+            return {"status": "error", "error": "No matching alive player units found"}
+
+        try:
+            x = float(params.get("x", 0.0))
+            y = float(params.get("y", 0.0))
+        except (ValueError, TypeError):
+            return {"status": "error", "error": "Invalid x, y coordinates"}
+
+        dispatcher.issue_move(tanks, x, y)
+        return {
+            "status": "ok",
+            "command": "command_move",
+            "destination": {"x": x, "y": y},
+            "affected_units": [t.id for t in tanks],
+            "count": len(tanks)
+        }
+
+    def command_attack(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """按照 ID 批量攻击指定目标"""
+        dispatcher = getattr(self.game_context, "command_dispatcher", None)
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not dispatcher or not physics:
+            return {"status": "error", "error": "Engine or dispatcher not available"}
+
+        tanks = self._get_target_player_tanks(params.get("unit_ids"))
+        if not tanks:
+            return {"status": "error", "error": "No matching alive player units found"}
+
+        target_id = params.get("target_id")
+        target_enemy = None
+        if target_id:
+            for e in physics.enemy_tanks:
+                if e.id == target_id and e.alive:
+                    target_enemy = e
+                    break
+
+        if not target_enemy:
+            # 若提供了坐标 (x, y)，寻找该坐标附近的敌军
+            if "x" in params and "y" in params:
+                tx = float(params["x"])
+                ty = float(params["y"])
+                for e in physics.enemy_tanks:
+                    if e.alive and abs(e.x - tx) < 40 and abs(e.y - ty) < 40:
+                        target_enemy = e
+                        break
+
+        if not target_enemy:
+            return {"status": "error", "error": f"Target enemy '{target_id}' not found or destroyed"}
+
+        dispatcher.issue_attack_target(tanks, target_enemy, physics)
+        return {
+            "status": "ok",
+            "command": "command_attack",
+            "target_id": target_enemy.id,
+            "affected_units": [t.id for t in tanks],
+            "count": len(tanks)
+        }
+
+    def command_set_tactic(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """按照 ID 批量设置己方单位的战术"""
+        dispatcher = getattr(self.game_context, "command_dispatcher", None)
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not dispatcher or not physics:
+            return {"status": "error", "error": "Engine or dispatcher not available"}
+
+        tanks = self._get_target_player_tanks(params.get("unit_ids"))
+        if not tanks:
+            return {"status": "error", "error": "No matching alive player units found"}
+
+        tactic_str = str(params.get("tactic", "aggressive")).lower().strip()
+        guard_target = None
+
+        if tactic_str in ("aggressive", "attack", "1"):
+            tactic_mode = TacticMode.AGGRESSIVE
+        elif tactic_str in ("defensive", "defense", "2"):
+            tactic_mode = TacticMode.DEFENSIVE
+        elif tactic_str in ("guard", "guard_unit", "3"):
+            tactic_mode = TacticMode.GUARD_UNIT
+            gt_id = params.get("guard_target_id")
+            if gt_id:
+                for ally in physics.player_tanks:
+                    if ally.id == gt_id and ally.alive:
+                        guard_target = ally
+                        break
+        elif tactic_str in ("stop", "idle", "manual"):
+            tactic_mode = TacticMode.MANUAL_OR_IDLE
+        else:
+            return {"status": "error", "error": f"Unknown tactic '{tactic_str}'"}
+
+        dispatcher.issue_tactic(tanks, tactic_mode, guard_target=guard_target)
+        return {
+            "status": "ok",
+            "command": "command_set_tactic",
+            "tactic": tactic_mode.value,
+            "guard_target": guard_target.id if guard_target else None,
+            "affected_units": [t.id for t in tanks],
+            "count": len(tanks)
+        }
+
+    def command_set_guard(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """按照 ID 批量让己方单位去跟踪并保卫特定己方单位"""
+        dispatcher = getattr(self.game_context, "command_dispatcher", None)
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not dispatcher or not physics:
+            return {"status": "error", "error": "Engine or dispatcher not available"}
+
+        tanks = self._get_target_player_tanks(params.get("unit_ids"))
+        if not tanks:
+            return {"status": "error", "error": "No matching alive player units found"}
+
+        target_id = params.get("target_id") or params.get("guard_target_id")
+        guard_target = None
+        if target_id:
+            for ally in physics.player_tanks:
+                if ally.id == target_id and ally.alive:
+                    guard_target = ally
+                    break
+
+        if not guard_target:
+            # 默认寻找核心补给要塞
+            for ally in physics.player_tanks:
+                if ally.alive and ally.is_tower and ally.tower_type == "supply":
+                    guard_target = ally
+                    break
+
+        if not guard_target:
+            return {"status": "error", "error": f"Guard target '{target_id}' not found"}
+
+        dispatcher.issue_guard_unit(tanks, guard_target)
+        return {
+            "status": "ok",
+            "command": "command_set_guard",
+            "guard_target": guard_target.id,
+            "affected_units": [t.id for t in tanks],
+            "count": len(tanks)
+        }
+
+    # ================= 6. api.report =================
+
+    def report(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """让特定 ID 的己方单位报告所有属性（战术、弹药、速度、HP 等）"""
+        physics = getattr(self.game_context, "physics_engine", None)
+        dispatcher = getattr(self.game_context, "command_dispatcher", None)
+        if not physics:
+            return {"status": "error", "error": "Physics engine not available"}
+
+        unit_id = str(params.get("unit_id") or params.get("id") or "").strip()
+        if not unit_id:
+            return {"status": "error", "error": "Missing 'unit_id' parameter"}
+
+        target_tank = None
+        for t in physics.player_tanks:
+            if t.id == unit_id:
+                target_tank = t
+                break
+
+        if not target_tank:
+            return {"status": "error", "error": f"Player unit with ID '{unit_id}' not found"}
+
+        tactic = dispatcher.get_tactic(target_tank) if dispatcher else None
+        auto_clr = dispatcher.is_auto_clear_path(target_tank) if dispatcher else False
+
+        report_data = {
+            "id": target_tank.id,
+            "alive": target_tank.alive,
+            "tactic": tactic.value if tactic else "manual",
+            "ammo": target_tank.ammo,
+            "max_ammo": target_tank.max_ammo,
+            "speed": target_tank.speed,
+            "hp": target_tank.health,
+            "max_hp": target_tank.max_health,
+            "x": round(target_tank.x, 2),
+            "y": round(target_tank.y, 2),
+            "direction": target_tank.direction.name,
+            "visibility": getattr(target_tank, "visibility", 1.0),
+            "vision_size": target_tank.vision_size,
+            "is_tower": target_tank.is_tower,
+            "tower_type": target_tank.tower_type,
+            "resupply_radius": target_tank.resupply_radius,
+            "auto_clear": auto_clr
+        }
+
+        return {
+            "status": "ok",
+            "report": report_data
+        }

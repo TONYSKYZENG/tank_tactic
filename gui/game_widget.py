@@ -80,10 +80,17 @@ class GameCanvasWidget(QWidget):
 
         self.game_over = False
         self.game_victory = False
+        self.is_paused = False
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._game_loop)
         self.timer.start(16)
+
+    def pause(self):
+        self.is_paused = True
+
+    def resume(self):
+        self.is_paused = False
 
     def _setup_conditions(self):
         self.condition_ctx = ConditionContext(self.physics_engine, self.game_map)
@@ -147,7 +154,7 @@ class GameCanvasWidget(QWidget):
                 tank_id=p_info.id,
                 vision_size=p_info.vision_size,
                 ammo=p_info.ammo,
-                visibility=1.0,
+                visibility=getattr(p_info, "visibility", 1.0),
                 is_tower=cfg.is_tower,
                 can_attack=cfg.can_attack,
                 tower_type=cfg.tower_type,
@@ -396,7 +403,7 @@ class GameCanvasWidget(QWidget):
         })
 
     def _game_loop(self):
-        if not self.game_over and not self.game_victory:
+        if not self.game_over and not self.game_victory and not self.is_paused:
             # 推进胜负条件计时上下文 (假设每步按约 16ms 步进)
             self.condition_ctx.update(0.016)
 

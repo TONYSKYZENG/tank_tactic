@@ -20,6 +20,10 @@ def parse_args():
     parser.add_argument("--ws-port", type=int, default=8765, help="操作端 WebUI WebSocket 串流端口 (默认: 8765)")
     parser.add_argument("--monitor-port", type=int, default=8088, help="辅助只读监视 WebUI 端口 (默认: 8088)")
     parser.add_argument("--monitor-host", type=str, default="0.0.0.0", help="辅助只读监视 WebUI 绑定地址 (默认: 0.0.0.0)")
+    parser.add_argument("--api-host", type=str, default="0.0.0.0", help="API 服务绑定地址 (默认: 0.0.0.0)")
+    parser.add_argument("--api-ws-port", type=int, default=8090, help="WebSocket API 端口 (默认: 8090)")
+    parser.add_argument("--api-tcp-port", type=int, default=8091, help="Raw TCP/IP API 端口 (默认: 8091)")
+    parser.add_argument("--api-udp-port", type=int, default=8092, help="UDP 探针与 API 端口 (默认: 8092)")
     parser.add_argument("--mission", type=str, default="missions/mission_01.json", help="指定任务配置文件路径")
     return parser.parse_args()
 
@@ -58,6 +62,8 @@ def main():
     monitor_server.start()
 
     # 5. 启动主游戏引擎 (区分 Web VNC 模式与 本地 PyQt 视窗模式)
+    from api import APIServerManager
+
     if args.web:
         import os
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -74,6 +80,17 @@ def main():
         active_engine = web_server.runner.physics_engine
         active_dispatcher = web_server.runner.command_dispatcher
 
+        # 启动三合一网络 API 服务
+        api_manager = APIServerManager(
+            game_context=web_server.runner,
+            host=args.api_host,
+            ws_port=args.api_ws_port,
+            tcp_port=args.api_tcp_port,
+            udp_port=args.api_udp_port,
+            termination_handler=app.quit
+        )
+        api_manager.start()
+
         print("=" * 64)
         print("🕹️  【操作端 Web VNC】可操控游戏界面已启动")
         print(f"🌐  操控页面: http://localhost:{args.port}")
@@ -86,6 +103,17 @@ def main():
         window = MainWindow(mission=mission, game_map=game_map, base_dir=BASE_DIR)
         active_engine = window.canvas.physics_engine
         active_dispatcher = window.canvas.command_dispatcher
+
+        # 启动三合一网络 API 服务
+        api_manager = APIServerManager(
+            game_context=window.canvas,
+            host=args.api_host,
+            ws_port=args.api_ws_port,
+            tcp_port=args.api_tcp_port,
+            udp_port=args.api_udp_port,
+            termination_handler=app.quit
+        )
+        api_manager.start()
 
         window.show()
         return app.exec_()

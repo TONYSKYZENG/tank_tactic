@@ -1,4 +1,12 @@
+import sys
 import unittest
+from pathlib import Path
+
+# 确保项目根目录在 sys.path 中
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 from physics.entities import Tank, Camp, Rect
 from physics.engine import PhysicsEngine
 from map_loader.models import GameMap
@@ -165,7 +173,8 @@ class TestConditions(unittest.TestCase):
 
     def test_mission_01_loading(self):
         """测试加载 missions/mission_01.json 并解析条件"""
-        mission = MissionLoader.load_from_file("missions/mission_01.json")
+        mission_file = BASE_DIR / "missions/mission_01.json"
+        mission = MissionLoader.load_from_file(mission_file)
         self.assertIsNotNone(mission.victory_conditions)
         self.assertIsNotNone(mission.defeat_conditions)
 

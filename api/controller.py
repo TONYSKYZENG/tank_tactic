@@ -802,11 +802,14 @@ class GameAPIController:
 
     def restart(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """重置战局并重新启动游戏引擎"""
-        self.pending_actions.clear()
-        if hasattr(self.game_context, "restart"):
-            self.game_context.restart()
-            return {"status": "ok", "message": "Game restarted successfully"}
-        return {"status": "error", "error": "Game context does not support restart"}
+        with self.lock:
+            self.pending_actions.clear()
+            if hasattr(self, "_unit_last_command"):
+                self._unit_last_command.clear()
+            if hasattr(self.game_context, "restart"):
+                self.game_context.restart()
+                return {"status": "ok", "message": "Game restarted successfully"}
+            return {"status": "error", "error": "Game context does not support restart"}
 
     # ================= 4. api.list_current_unit_id / api.list_enemy_curr =================
 

@@ -44,14 +44,31 @@ def main():
         return 1
     game_map = MapLoader.load_from_file(map_path)
 
-    # 3. 准备只读监控状态获取句柄
-    active_engine = None
-    active_dispatcher = None
-    active_res_mgr = None
+    # 3. 准备只读监控状态获取句柄（动态绑定活动 game_context，避免 restart 产生旧引用悬挂）
+    active_context = [None]
 
     def get_current_state():
-        if active_engine and active_dispatcher:
-            return extract_game_state_snapshot(active_engine, game_map, active_dispatcher, active_res_mgr)
+        ctx = active_context[0]
+        if not ctx:
+            return {"status": "initializing"}
+        lock = getattr(getattr(ctx, "api_controller", None), "lock", None)
+        if lock:
+            with lock:
+                pe = getattr(ctx, "physics_engine", None)
+                gm = getattr(ctx, "game_map", None)
+                cd = getattr(ctx, "command_dispatcher", None)
+                rm = getattr(ctx, "resource_manager", None)
+                mid = getattr(ctx, "match_id", 0)
+                if pe and gm and cd:
+                    return extract_game_state_snapshot(pe, gm, cd, rm, match_id=mid)
+        else:
+            pe = getattr(ctx, "physics_engine", None)
+            gm = getattr(ctx, "game_map", None)
+            cd = getattr(ctx, "command_dispatcher", None)
+            rm = getattr(ctx, "resource_manager", None)
+            mid = getattr(ctx, "match_id", 0)
+            if pe and gm and cd:
+                return extract_game_state_snapshot(pe, gm, cd, rm, match_id=mid)
         return {"status": "initializing"}
 
     # 4. 启动【永远在线】的辅助只读全知监控 WebUI (默认 0.0.0.0:8088)
@@ -78,9 +95,7 @@ def main():
             http_port=args.port,
             ws_port=args.ws_port
         )
-        active_engine = web_server.runner.physics_engine
-        active_dispatcher = web_server.runner.command_dispatcher
-        active_res_mgr = web_server.runner.resource_manager
+        active_context[0] = web_server.runner
 
         # 启动三合一网络 API 服务
         api_manager = APIServerManager(
@@ -103,9 +118,7 @@ def main():
         app = QApplication(sys.argv)
         from gui import MainWindow
         window = MainWindow(mission=mission, game_map=game_map, base_dir=BASE_DIR)
-        active_engine = window.canvas.physics_engine
-        active_dispatcher = window.canvas.command_dispatcher
-        active_res_mgr = window.canvas.resource_manager
+        active_context[0] = window.canvas
 
         # 启动三合一网络 API 服务
         api_manager = APIServerManager(

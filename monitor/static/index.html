@@ -674,6 +674,7 @@
     const tbEAlloyRate = document.getElementById('tb-e-alloy-rate');
 
     let lastData = null;
+    let currentMatchId = null;
     metaPort.innerText = window.location.port || '8088';
 
     async function fetchState() {
@@ -681,6 +682,27 @@
         const resp = await fetch('/api/state');
         if (!resp.ok) return;
         const data = await resp.json();
+
+        // 容错处理：若战局正在重启初始化中或发生临时异常，保留显示初始化，不破坏DOM，避免闪烁抽风
+        if (data.status === 'initializing' || data.error) {
+          const dict = I18N[currentLang];
+          metaStatus.innerText = dict.status_init;
+          metaStatus.style.color = '#F59E0B';
+          return;
+        }
+
+        // 检测战局重启 (match_id 改变)
+        if (data.match_id !== undefined && currentMatchId !== null && data.match_id !== currentMatchId) {
+          // 清除旧战局的画布内容与所有表格列表残留
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          tbodyPlayer.innerHTML = '';
+          tbodyEnemy.innerHTML = '';
+          tbodyBlocks.innerHTML = '';
+        }
+        if (data.match_id !== undefined) {
+          currentMatchId = data.match_id;
+        }
+
         lastData = data;
         renderRadar(data);
         renderTables(data);

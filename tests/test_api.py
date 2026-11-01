@@ -838,5 +838,78 @@ class TestGameAPI(unittest.TestCase):
         self.assertEqual(sent[-1]["x"], 300.0)
         self.assertEqual(sent[-1]["y"], 400.0)
 
+    def test_web_god_mode_ui_and_restart_consistency(self):
+        """测试 Web 上帝模式 (Monitor) 在 api.restart() 后状态平滑刷新，杜绝抽风与残留上一局旧数据"""
+        from mission_loader import MissionLoader
+        from map_loader import MapLoader
+        from webui.headless_runner import HeadlessGameRunner
+        from monitor.server import extract_game_state_snapshot
+
+        mission_path = BASE_DIR / "missions/mission_01.json"
+        mission = MissionLoader.load_from_file(mission_path)
+        map_path = BASE_DIR / mission.map_file
+        game_map = MapLoader.load_from_file(map_path)
+
+        runner = HeadlessGameRunner(mission, game_map, BASE_DIR)
+        controller = runner.api_controller
+
+        # 模拟 tanks.py 动态 context 获取快照
+        active_ctx = [runner]
+        def dynamic_state_getter():
+            ctx = active_ctx[0]
+            if not ctx:
+                return {"status": "initializing"}
+            lock = getattr(getattr(ctx, "api_controller", None), "lock", None)
+            if lock:
+                with lock:
+                    pe = getattr(ctx, "physics_engine", None)
+                    gm = getattr(ctx, "game_map", None)
+                    cd = getattr(ctx, "command_dispatcher", None)
+                    rm = getattr(ctx, "resource_manager", None)
+                    mid = getattr(ctx, "match_id", 0)
+                    if pe and gm and cd:
+                        return extract_game_state_snapshot(pe, gm, cd, rm, match_id=mid)
+            return {"status": "initializing"}
+
+        # 1. 验证第 1 局初始状态快照
+        snap1 = dynamic_state_getter()
+        self.assertEqual(snap1["match_id"], 1)
+        orig_player_count = len(snap1["player_units"])
+        self.assertGreater(orig_player_count, 0)
+        first_tank = snap1["player_units"][0]
+        orig_x, orig_y = first_tank["x"], first_tank["y"]
+
+        # 2. 模拟第 1 局发生战斗与破坏：坦克移动、砖块破坏、下发时序指令
+        controller.handle_request(json.dumps({"action": "api.move", "unit_ids": first_tank["id"], "x": orig_x + 60, "y": orig_y + 60, "seq": 10}))
+        runner.physics_engine.player_tanks[0].x = orig_x + 60
+        runner.physics_engine.player_tanks[0].y = orig_y + 60
+        # 破坏一个砖块 (TileType.EMPTY = 0, BRICK = 1)
+        test_col, test_row = 1, 1
+        runner.game_map.grid[test_row][test_col] = 0
+
+        snap1_modified = dynamic_state_getter()
+        self.assertEqual(snap1_modified["player_units"][0]["x"], round(orig_x + 60, 1))
+        self.assertEqual(snap1_modified["map"]["grid"][test_row][test_col], 0)
+        self.assertIn(first_tank["id"], controller._unit_last_command)
+
+        # 3. 执行 api.restart()
+        resp_restart = json.loads(controller.handle_request("restart()"))
+        self.assertEqual(resp_restart["status"], "ok")
+
+        # 4. 验证重启后快照：match_id 递增、砖块恢复、坦克位置重置，绝无上一局残留
+        snap2 = dynamic_state_getter()
+        self.assertEqual(snap2["match_id"], 2)
+        # 验证坦克回到初始位置
+        self.assertEqual(snap2["player_units"][0]["x"], orig_x)
+        self.assertEqual(snap2["player_units"][0]["y"], orig_y)
+        # 验证地图重新加载，被破坏的砖块恢复
+        fresh_map = MapLoader.load_from_file(map_path)
+        self.assertEqual(snap2["map"]["grid"][test_row][test_col], fresh_map.grid[test_row][test_col])
+        # 验证防抽风序列号缓存已清理，允许新局从 seq: 1 正常下发
+        self.assertNotIn(first_tank["id"], controller._unit_last_command)
+
+        runner.stop()
+
+
 if __name__ == "__main__":
     unittest.main()

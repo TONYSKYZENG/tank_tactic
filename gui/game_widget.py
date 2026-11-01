@@ -76,6 +76,7 @@ class GameCanvasWidget(QWidget):
 
         # 指令标记 (x, y, is_attack, life_frames)
         self.command_marker: Optional[Tuple[float, float, bool, int]] = None
+        self.match_id = 1
 
         # 初始化资源与经济系统
         self.resource_loader = ResourceLoader()
@@ -144,6 +145,14 @@ class GameCanvasWidget(QWidget):
             self.defeat_condition = OrCondition(defeat_subs)
 
     def restart(self):
+        lock = getattr(getattr(self, "api_controller", None), "lock", None)
+        if lock:
+            with lock:
+                self._do_restart()
+        else:
+            self._do_restart()
+
+    def _do_restart(self):
         if hasattr(self, "ai_script_manager"):
             self.ai_script_manager.stop_all()
 
@@ -155,6 +164,16 @@ class GameCanvasWidget(QWidget):
         self.command_marker = None
         if hasattr(self, "api_controller"):
             self.api_controller.pending_actions.clear()
+            if hasattr(self.api_controller, "_unit_last_command"):
+                self.api_controller._unit_last_command.clear()
+
+        # 1. 重新从地图文件完整加载全新干净的地形，恢复所有被破坏的砖块与初始网格
+        map_path = self.base_dir / self.mission.map_file
+        if map_path.exists():
+            from map_loader import MapLoader
+            self.game_map = MapLoader.load_from_file(map_path)
+
+        # 2. 重新初始化物理引擎、AI与调度器
         self.physics_engine = PhysicsEngine(
             self.game_map,
             fog_of_war_enabled=self.mission.fog_of_war,
@@ -163,9 +182,23 @@ class GameCanvasWidget(QWidget):
         self.ai_controller = EnemyAIController(self.physics_engine, self.game_map)
         self.selection_mgr = SelectionManager()
         self.command_dispatcher = CommandDispatcher()
+
+        # 3. 重新初始化战略资源与采矿矿点
+        self.resource_manager = ResourceManager(
+            initial_resources=getattr(self.mission, "initial_resources", None),
+            player_initial_resources=getattr(self.mission, "player_initial_resources", None),
+            enemy_initial_resources=getattr(self.mission, "enemy_initial_resources", None)
+        )
+        self.resource_manager.init_from_map(self.game_map, self.resource_configs)
+
+        # 4. 重新初始化任务实体与胜负条件
         self._setup_mission_entities()
         self._setup_conditions()
 
+        # 5. 递增战局轮次标识
+        self.match_id = getattr(self, "match_id", 0) + 1
+
+        # 6. 重启 AI 战术脚本
         if hasattr(self, "ai_script_manager") and hasattr(self, "api_controller"):
             all_tanks = self.physics_engine.player_tanks + self.physics_engine.enemy_tanks
             self.ai_script_manager.start_scripts(all_tanks, self.api_controller, self.base_dir)

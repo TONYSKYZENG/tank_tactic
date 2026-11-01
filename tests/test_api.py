@@ -12,6 +12,7 @@ if str(BASE_DIR) not in sys.path:
 
 from PyQt5.QtCore import QCoreApplication
 from map_loader.models import GameMap
+from mission_loader.models import Mission, PlayerMissionInfo, SpawnPoint
 from physics.entities import Tank, Bullet, Camp, Direction
 from physics.engine import PhysicsEngine
 from command.dispatcher import CommandDispatcher
@@ -22,11 +23,21 @@ from resource.models import ResourceManager
 from command.commands import MoveCommand
 from api.controller import GameAPIController
 from api.server import APIServerManager
+from ai.controller import EnemyAIController
 
 class MockGameContext:
     def __init__(self):
+        self.base_dir = BASE_DIR
         self.game_map = GameMap("TestMap", 32, 20, 20, [[0]*20 for _ in range(20)])
+        self.mission = Mission(
+            name="Test Defense Mission",
+            map_file="maps/test.json",
+            player=PlayerMissionInfo(config_file="tank_configs/player_tank.json", spawn=SpawnPoint(2, 2)),
+            enemies=[],
+            briefing="指挥官，歼灭所有来犯敌军！"
+        )
         self.physics_engine = PhysicsEngine(self.game_map, fog_of_war_enabled=False, limited_ammo_enabled=True)
+        self.ai_controller = EnemyAIController(self.physics_engine, self.game_map)
         self.command_dispatcher = CommandDispatcher()
         self.condition_ctx = ConditionContext(self.physics_engine, self.game_map)
         self.resource_manager = ResourceManager()
@@ -910,6 +921,308 @@ class TestGameAPI(unittest.TestCase):
 
         runner.stop()
 
+    def test_get_mission_info_json_and_plain(self):
+        """测试 api.get_mission_info 接口（JSON 与 Plain 函数调用格式），返回简报与地图各尺寸边界"""
+        # 1. JSON 格式调用
+        resp_json = json.loads(self.controller.handle_request(json.dumps({"action": "api.get_mission_info"})))
+        self.assertEqual(resp_json["status"], "ok")
+        self.assertEqual(resp_json["mission_name"], "Test Defense Mission")
+        self.assertEqual(resp_json["briefing"], "指挥官，歼灭所有来犯敌军！")
+        self.assertEqual(resp_json["cols"], 20)
+        self.assertEqual(resp_json["rows"], 20)
+        self.assertEqual(resp_json["tile_size"], 32)
+        self.assertEqual(resp_json["pixel_width"], 640.0)
+        self.assertEqual(resp_json["pixel_height"], 640.0)
+        self.assertEqual(resp_json["max_x"], 640.0)
+        self.assertEqual(resp_json["max_y"], 640.0)
+        self.assertIn("map_size", resp_json)
+        self.assertEqual(resp_json["map_size"]["cols"], 20)
+        self.assertEqual(resp_json["map_size"]["rows"], 20)
+        self.assertEqual(resp_json["map_size"]["max_x"], 640.0)
+        self.assertEqual(resp_json["map_size"]["max_y"], 640.0)
+
+        # 2. Plain 函数调用格式 get_mission_info()
+        resp_plain = json.loads(self.controller.handle_request("get_mission_info()"))
+        self.assertEqual(resp_plain["status"], "ok")
+        self.assertEqual(resp_plain["briefing"], "指挥官，歼灭所有来犯敌军！")
+        self.assertEqual(resp_plain["pixel_width"], 640.0)
+
+        # 3. Plain 别名 briefing()
+        resp_briefing = json.loads(self.controller.handle_request("briefing()"))
+        self.assertEqual(resp_briefing["status"], "ok")
+        self.assertEqual(resp_briefing["briefing"], "指挥官，歼灭所有来犯敌军！")
+
+        # 4. TankScriptAPI 转写调用
+        from ai_python.bridge import TankScriptAPI
+        import threading
+        stop_evt = threading.Event()
+        api_bridge = TankScriptAPI("player_alpha", self.controller, stop_evt)
+        bridge_info = api_bridge.get_mission_info()
+        self.assertEqual(bridge_info["status"], "ok")
+        self.assertEqual(bridge_info["briefing"], "指挥官，歼灭所有来犯敌军！")
+        self.assertEqual(bridge_info["cols"], 20)
+        self.assertEqual(bridge_info["rows"], 20)
+        self.assertEqual(bridge_info["max_x"], 640.0)
+        self.assertEqual(bridge_info["max_y"], 640.0)
+
+    def test_edit_attr_api(self):
+        """测试 api.edit_attr：动态修改属性、自动类型处理、批量修改、仅无匹配对象报错、无属性自动跳过"""
+        from ai_python.bridge import TankScriptAPI
+        import threading
+        stop_evt = threading.Event()
+        api_bridge = TankScriptAPI("player_alpha", self.controller, stop_evt)
+
+        # 1. 单单位修改属性，并验证自动类型推断转换 (字符串 "6.5" 自动转为 float，字符串 "8" 自动转为 int)
+        resp1 = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.edit_attr",
+            "unit_ids": "player_alpha",
+            "attr": "speed",
+            "value": "6.5"
+        })))
+        self.assertEqual(resp1["status"], "ok")
+        self.assertIn("player_alpha", resp1["updated_units"])
+        self.assertEqual(self.mock_game.p1.speed, 6.5)
+
+        # 验证 bool 字符串转换
+        resp_bool = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.edit_attr",
+            "unit_ids": "player_alpha",
+            "attr": "controllable",
+            "value": "false"
+        })))
+        self.assertEqual(resp_bool["status"], "ok")
+        self.assertFalse(self.mock_game.p1.controllable)
+
+        # 2. 批量修改多单位属性 (逗号分隔或列表)
+        resp_batch = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.edit_attr",
+            "unit_ids": ["player_alpha", "player_bravo"],
+            "attr": "ammo",
+            "value": 88
+        })))
+        self.assertEqual(resp_batch["status"], "ok")
+        self.assertIn("player_alpha", resp_batch["updated_units"])
+        self.assertIn("player_bravo", resp_batch["updated_units"])
+        self.assertEqual(self.mock_game.p1.ammo, 88)
+        self.assertEqual(self.mock_game.p2.ammo, 88)
+
+        # 3. '*' 通配修改全图所有单位
+        resp_all = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.edit_attr",
+            "unit_ids": "*",
+            "attr": "health",
+            "value": 15
+        })))
+        self.assertEqual(resp_all["status"], "ok")
+        self.assertEqual(self.mock_game.p1.health, 15)
+        self.assertEqual(self.mock_game.p2.health, 15)
+        self.assertEqual(self.mock_game.e1.health, 15)
+
+        # 4. 仅在一个对象也找不到的时候报错
+        resp_err = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.edit_attr",
+            "unit_ids": "ghost_unit_999",
+            "attr": "speed",
+            "value": 10
+        })))
+        self.assertEqual(resp_err["status"], "error")
+        self.assertIn("No matching units found", resp_err["error"])
+
+        # 5. 某个对象不存在这个属性则自动跳过（不报错）
+        # 给 player_alpha 动态绑定一个专有属性，player_bravo 不具备
+        self.mock_game.p1.special_shield = 100
+        if hasattr(self.mock_game.p2, "special_shield"):
+            delattr(self.mock_game.p2, "special_shield")
+
+        resp_skip = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.edit_attr",
+            "unit_ids": ["player_alpha", "player_bravo"],
+            "attr": "special_shield",
+            "value": 250
+        })))
+        self.assertEqual(resp_skip["status"], "ok")
+        self.assertIn("player_alpha", resp_skip["updated_units"])
+        self.assertIn("player_bravo", resp_skip["skipped_units"])
+        self.assertEqual(self.mock_game.p1.special_shield, 250)
+
+        # 6. Plain 函数调用格式与成对定界符
+        resp_plain = json.loads(self.controller.handle_request('edit_attr([player_alpha, player_bravo], "speed", 7.2)'))
+        self.assertEqual(resp_plain["status"], "ok")
+        self.assertEqual(self.mock_game.p1.speed, 7.2)
+        self.assertEqual(self.mock_game.p2.speed, 7.2)
+
+        # 7. TankScriptAPI 桥接调用
+        resp_bridge = api_bridge.edit_attr("player_alpha", "speed", 9.0)
+        self.assertEqual(resp_bridge["status"], "ok")
+        self.assertEqual(self.mock_game.p1.speed, 9.0)
+
+    def test_set_resources_api(self):
+        """测试 api.set_resources：修改双方全局战略资源、增量修改、Plain 格式与 Python 桥接"""
+        from ai_python.bridge import TankScriptAPI
+        import threading
+        stop_evt = threading.Event()
+        api_bridge = TankScriptAPI("player_alpha", self.controller, stop_evt)
+
+        # 1. 同时设定双方资源储备 (camp='both')
+        resp1 = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.set_resources",
+            "camp": "both",
+            "dark_matter": 800.0,
+            "alloy": 400.0
+        })))
+        self.assertEqual(resp1["status"], "ok")
+        self.assertEqual(resp1["player"]["dark_matter"], 800.0)
+        self.assertEqual(resp1["player"]["alloy"], 400.0)
+        self.assertEqual(resp1["enemy"]["dark_matter"], 800.0)
+        self.assertEqual(resp1["enemy"]["alloy"], 400.0)
+
+        # 2. 单独设定敌方储备
+        resp2 = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.set_resources",
+            "camp": "enemy",
+            "dark_matter": 1200.0
+        })))
+        self.assertEqual(resp2["status"], "ok")
+        self.assertEqual(resp2["enemy"]["dark_matter"], 1200.0)
+        self.assertEqual(resp2["player"]["dark_matter"], 800.0)
+
+        # 3. 增量修改模式 mode='add'
+        resp3 = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.set_resources",
+            "camp": "player",
+            "dark_matter": 200.0,
+            "mode": "add"
+        })))
+        self.assertEqual(resp3["status"], "ok")
+        self.assertEqual(resp3["player"]["dark_matter"], 1000.0)
+
+        # 4. Plain 函数格式调用
+        resp_plain = json.loads(self.controller.handle_request('set_resources("both", 600, 350)'))
+        self.assertEqual(resp_plain["status"], "ok")
+        self.assertEqual(resp_plain["player"]["dark_matter"], 600.0)
+        self.assertEqual(resp_plain["enemy"]["alloy"], 350.0)
+
+        # 5. TankScriptAPI 桥接调用
+        resp_bridge = api_bridge.set_resources(camp="player", dark_matter=9999.0, alloy=5555.0)
+        self.assertEqual(resp_bridge["status"], "ok")
+        self.assertEqual(resp_bridge["player"]["dark_matter"], 9999.0)
+        self.assertEqual(resp_bridge["player"]["alloy"], 5555.0)
+
+    def test_create_unit_api(self):
+        """测试 api.create_unit：动态造兵部署、阵营注册、唯一 ID 分配、Plain 格式与 Python 桥接"""
+        from ai_python.bridge import TankScriptAPI
+        import threading
+        stop_evt = threading.Event()
+        api_bridge = TankScriptAPI("player_alpha", self.controller, stop_evt)
+
+        # 1. 创建全新我方单位 (自动生成 ID，使用 player_tank 配置)
+        resp1 = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.create_unit",
+            "camp": "player",
+            "x": 120.0,
+            "y": 140.0,
+            "config_file": "tank_configs/player_tank.json",
+            "health": 6,
+            "ammo": 35
+        })))
+        self.assertEqual(resp1["status"], "ok")
+        new_p_id = resp1["unit_id"]
+        self.assertTrue(new_p_id.startswith("player_unit_"))
+        created_p = next((t for t in self.mock_game.physics_engine.player_tanks if t.id == new_p_id), None)
+        self.assertIsNotNone(created_p)
+        self.assertEqual(created_p.health, 6)
+        self.assertEqual(created_p.ammo, 35)
+        self.assertIn(new_p_id, self.mock_game.command_dispatcher.tank_commands)
+
+        # 2. 创建全新敌方单位 (指定 ID 与 tactic)
+        resp2 = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.create_unit",
+            "camp": "enemy",
+            "x": 450.0,
+            "y": 350.0,
+            "unit_id": "enemy_custom_assault",
+            "config_file": "enemy_fast",
+            "tactic": "charge_base"
+        })))
+        self.assertEqual(resp2["status"], "ok")
+        self.assertEqual(resp2["unit_id"], "enemy_custom_assault")
+        created_e = next((t for t in self.mock_game.physics_engine.enemy_tanks if t.id == "enemy_custom_assault"), None)
+        self.assertIsNotNone(created_e)
+        self.assertIn("enemy_custom_assault", self.mock_game.ai_controller.agents)
+
+        # 3. 重复 ID 返回错误
+        resp_dup = json.loads(self.controller.handle_request(json.dumps({
+            "action": "api.create_unit",
+            "camp": "player",
+            "unit_id": "player_alpha"
+        })))
+        self.assertEqual(resp_dup["status"], "error")
+        self.assertIn("already exists", resp_dup["error"])
+
+        # 4. Plain 函数格式调用
+        resp_plain = json.loads(self.controller.handle_request('create_unit("player", 220, 240, "player_tank", "player_plain_reinforce")'))
+        self.assertEqual(resp_plain["status"], "ok")
+        self.assertEqual(resp_plain["unit_id"], "player_plain_reinforce")
+        self.assertTrue(any(t.id == "player_plain_reinforce" for t in self.mock_game.physics_engine.player_tanks))
+
+        # 5. TankScriptAPI 桥接调用
+        resp_bridge = api_bridge.create_unit(camp="enemy", x=300.0, y=200.0, unit_id="enemy_bridge_spawn")
+        self.assertEqual(resp_bridge["status"], "ok")
+        self.assertEqual(resp_bridge["unit_id"], "enemy_bridge_spawn")
+        self.assertTrue(any(t.id == "enemy_bridge_spawn" for t in self.mock_game.physics_engine.enemy_tanks))
+
+    def test_get_game_time_api_and_grizzly_spawner(self):
+        """测试 api.get_game_time：活跃运行毫秒数、暂停期间冻结计时、Python 桥接以及灰熊坦克刷新脚本"""
+        from ai_python.bridge import TankScriptAPI
+        from tank_configs.config_loader import TankConfig
+        import threading
+        stop_evt = threading.Event()
+        api_bridge = TankScriptAPI("player_alpha", self.controller, stop_evt)
+
+        # 1. 初始时间为 0
+        self.mock_game.condition_ctx.elapsed_time = 0.0
+        resp1 = json.loads(self.controller.handle_request(json.dumps({"action": "api.get_game_time"})))
+        self.assertEqual(resp1["status"], "ok")
+        self.assertEqual(resp1["game_time_ms"], 0)
+        self.assertEqual(resp1["game_time_sec"], 0.0)
+
+        # 2. 模拟活跃运行 2.5 秒 (2500 ms)
+        self.mock_game.condition_ctx.update(2.5)
+        resp2 = json.loads(self.controller.handle_request(json.dumps({"action": "api.get_game_time"})))
+        self.assertEqual(resp2["status"], "ok")
+        self.assertEqual(resp2["game_time_ms"], 2500)
+        self.assertEqual(resp2["game_time_sec"], 2.5)
+
+        # 3. 模拟暂停：暂停期间调用 update 不应增加时间，活跃毫秒数保持冻结
+        self.mock_game.is_paused = True
+        # 在实际引擎循环中，is_paused 时不会调用 condition_ctx.update
+        resp3 = json.loads(self.controller.handle_request("get_game_time()"))
+        self.assertEqual(resp3["status"], "ok")
+        self.assertEqual(resp3["game_time_ms"], 2500)
+        self.assertTrue(resp3["is_paused"])
+
+        # 4. TankScriptAPI 桥接测试
+        ms = api_bridge.get_time_ms()
+        self.assertEqual(ms, 2500)
+
+        # 5. 验证灰熊坦克配置 grizzly_tank.json 可正常加载
+        cfg_path = BASE_DIR / "tank_configs" / "grizzly_tank.json"
+        self.assertTrue(cfg_path.exists())
+        grizzly_cfg = TankConfig.from_json(cfg_path)
+        self.assertEqual(grizzly_cfg.name, "Grizzly Tank")
+
+        # 6. 验证 ai_python/grizzly_spawner.py 脚本格式与可调用性
+        spawner_path = BASE_DIR / "ai_python" / "grizzly_spawner.py"
+        self.assertTrue(spawner_path.exists())
+        with open(spawner_path, "r", encoding="utf-8") as f:
+            code = f.read()
+        self.assertIn("def run(api):", code)
+        self.assertIn("grizzly_tank", code)
+        self.assertIn("spawn_interval_ms = 10000", code)
+
 
 if __name__ == "__main__":
+
+
+
     unittest.main()

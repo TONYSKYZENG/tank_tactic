@@ -1,0 +1,21 @@
+{
+  "name": "Grizzly Tank",
+  "speed": 2.2,
+  "size": 30,
+  "color": "#7F8C8D",
+  "track_color": "#2C3E50",
+  "bullet_speed": 7.0,
+  "bullet_size": 10,
+  "bullet_color": "#F39C12",
+  "fire_cooldown": 14,
+  "health": 2,
+  "is_tower": false,
+  "can_attack": true,
+  "can_crush_bricks": false,
+  "crush_speed_factor": 0.5,
+  "converter_table": [],
+  "harvest_speed": {
+    "dark_matter": 2.0,
+    "alloy": 1.5
+  }
+}

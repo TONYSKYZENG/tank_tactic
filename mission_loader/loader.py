@@ -68,6 +68,7 @@ class MissionLoader:
 
         p_init_res = data.get("player_initial_resources") or data.get("initial_resources", None)
         e_init_res = data.get("enemy_initial_resources", None)
+        briefing = str(data.get("briefing") or data.get("description", "") or "")
 
         return Mission(
             name=data.get("name", "Unnamed Mission"),
@@ -77,6 +78,7 @@ class MissionLoader:
             player_units=player_units,
             fog_of_war=fog_of_war,
             limited_ammo=limited_ammo,
+            briefing=briefing,
             victory_conditions=data.get("victory_conditions", None),
             defeat_conditions=data.get("defeat_conditions", None),
             initial_resources=p_init_res,

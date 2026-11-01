@@ -317,3 +317,13 @@ class ResourceManager:
     def add_resources(self, rewards: Dict[str, float], camp: Any = "player") -> None:
         for res_type, amt in rewards.items():
             self.add_resource(res_type, amt, camp=camp)
+
+    def set_resource(self, resource_type: str, amount: float, camp: Any = "player") -> None:
+        camp_key = self._normalize_camp(camp)
+        self.stockpiles.setdefault(camp_key, {})[resource_type] = max(0.0, float(amount))
+
+    def set_resources(self, resources: Dict[str, float], camp: Any = "player") -> None:
+        camp_key = self._normalize_camp(camp)
+        for res_type, amt in resources.items():
+            self.set_resource(res_type, amt, camp=camp_key)
+

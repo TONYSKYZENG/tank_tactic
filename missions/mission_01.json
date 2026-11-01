@@ -1,5 +1,6 @@
 {
   "name": "Mission 1: Defense of Eagle Fortress",
+  "briefing": "指挥官！敌军先遣部队正在集结并逼近我方老鹰基地。请率领MCV与防御部队固守阵线，利用暗物质与合金资源研发增援，彻底歼灭来犯敌军！",
   "map_file": "maps/level_01.json",
   "fog_of_war": true,
   "limited_ammo": true,

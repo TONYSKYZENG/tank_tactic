@@ -802,6 +802,184 @@ terminate_convert("player_alpha")
 
 ---
 
+### 18. `api.get_mission_info` (or `mission_info` / `briefing`)
+Query the mission background briefing narrative, linked map name, and map dimension limits (grid columns & rows, tile size, pixel dimensions, coordinate x/y upper limits).
+
+#### Request (Plain or JSON):
+```text
+get_mission_info()
+```
+or
+```json
+{
+  "action": "api.get_mission_info"
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "mission_name": "Mission 1: Defense of Eagle Fortress",
+  "briefing": "指挥官！敌军先遣部队正在集结并逼近我方老鹰基地。请率领MCV与防御部队固守阵线，利用暗物质与合金资源研发增援，彻底歼灭来犯敌军！",
+  "map_name": "Level 1: Industrial Frontier",
+  "map_file": "maps/level_01.json",
+  "cols": 20,
+  "rows": 16,
+  "tile_size": 36,
+  "pixel_width": 720.0,
+  "pixel_height": 576.0,
+  "max_x": 720.0,
+  "max_y": 576.0,
+  "map_size": {
+    "cols": 20,
+    "rows": 16,
+    "grid_width": 20,
+    "grid_height": 16,
+    "tile_size": 36,
+    "pixel_width": 720.0,
+    "pixel_height": 576.0,
+    "max_x": 720.0,
+    "max_y": 576.0,
+    "max_col": 20,
+    "max_row": 16
+  }
+}
+```
+
+---
+
+### 19. `api.edit_attr` (or `edit_attr`)
+Dynamically modify attribute(s) of one or more existing unit objects on the battlefield (supports batch ID lists and `*`). Data types (`int`, `float`, `bool`, `list`, `str`) are inferred and converted automatically.
+* **Error handling rule**: Only returns an error if **no target objects can be found**. If a target object does not have the specified attribute, it is automatically skipped.
+
+#### Request (Plain or JSON):
+```text
+edit_attr([player_alpha, player_bravo], speed, 5.0)
+```
+or
+```json
+{
+  "action": "api.edit_attr",
+  "unit_ids": ["player_alpha", "player_bravo"],
+  "attr": "speed",
+  "value": 5.0
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "attr": "speed",
+  "value": 5.0,
+  "updated_units": ["player_alpha", "player_bravo"],
+  "skipped_units": []
+}
+```
+
+---
+
+### 20. `api.set_resources` (or `set_resources` / `modify_resources`)
+Modify global strategic resource stockpiles for either or both camps (`"both"`, `"player"`, or `"enemy"`).
+
+#### Request (Plain or JSON):
+```text
+set_resources("both", 1000.0, 500.0)
+```
+or
+```json
+{
+  "action": "api.set_resources",
+  "camp": "both",
+  "dark_matter": 1000.0,
+  "alloy": 500.0,
+  "mode": "set"
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "mode": "set",
+  "stockpiles": {
+    "player": {"dark_matter": 1000.0, "alloy": 500.0},
+    "enemy": {"dark_matter": 1000.0, "alloy": 500.0}
+  },
+  "player": {"dark_matter": 1000.0, "alloy": 500.0},
+  "enemy": {"dark_matter": 1000.0, "alloy": 500.0}
+}
+```
+
+---
+
+### 21. `api.create_unit` (or `create_unit` / `spawn_unit`)
+Dynamically spawn and deploy a new combat unit or defensive tower onto the live battlefield. Automatically resolves chassis templates, initializes physics entities, and registers the unit with dispatcher and enemy AI controllers.
+
+#### Request (Plain or JSON):
+```text
+create_unit("player", 150.0, 200.0, "tank_configs/player_tank.json", "reinforcement_alpha")
+```
+or
+```json
+{
+  "action": "api.create_unit",
+  "camp": "player",
+  "x": 150.0,
+  "y": 200.0,
+  "config_file": "tank_configs/player_tank.json",
+  "unit_id": "reinforcement_alpha",
+  "health": 5,
+  "ammo": 40
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "unit_id": "reinforcement_alpha",
+  "camp": "player",
+  "x": 150.0,
+  "y": 200.0,
+  "health": 5,
+  "ammo": 40,
+  "speed": 3.0,
+  "unit_type": "Classic Tank",
+  "config_file": "tank_configs/player_tank.json"
+}
+```
+
+---
+
+### 22. `api.get_game_time` (or `game_time` / `time`)
+Query active simulation elapsed runtime in milliseconds and seconds.
+* **Pause freezing guarantee**: Active runtime accumulation strictly freezes during engine pauses and resumes seamlessly upon unpausing.
+
+#### Request (Plain or JSON):
+```text
+get_game_time()
+```
+or
+```json
+{
+  "action": "api.get_game_time"
+}
+```
+
+#### Response:
+```json
+{
+  "status": "ok",
+  "game_time_ms": 14250,
+  "game_time_sec": 14.25,
+  "is_paused": false
+}
+```
+
+---
+
 ## 💻 Interactive Console CLI (`tests/cli_client.py`)
 
 A built-in interactive console client is provided for quick terminal debugging and manual interaction. It supports both space-separated CLI shortcuts and direct **`func(arg1, arg2, ...)`** plain API calls.
@@ -831,6 +1009,8 @@ python3 tests/cli_client.py --cmd "report('player_alpha')"
 | `resume` / `resume()` | Resume engine simulation loop |
 | `restart` / `restart()` | Reset battle & restart simulation |
 | `status` / `is_success()` | Check victory & defeat status |
+| `time` / `get_game_time()` | Query active simulation runtime in milliseconds (frozen during pause) |
+| `mission_info` / `get_mission_info()` | Query mission briefing narrative and map size/limits |
 | `list` / `list_current_unit_id()` | List surviving friendly unit IDs |
 | `list_enemy [god]` / `list_enemy_curr(true)` | List currently visible enemy IDs (or all if `god`) |
 | `list_enemy_mem` / `list_enemy_mem()` | List enemy IDs recorded in global memory (tracked & lost) |
@@ -850,6 +1030,9 @@ python3 tests/cli_client.py --cmd "report('player_alpha')"
 | `show_converter <id>` / `show_converter("id")` | Display detailed parameters of a converter recipe |
 | `convert <id> <r_id> [n]` / `convert("id", "r_id", n)` | Enqueue recipe conversion or tank production |
 | `terminate_convert [id]` / `terminate_convert("id")` | Terminate active conversion and clear queue |
+| `edit_attr <ids> <attr> <val>` / `edit_attr([ids], attr, val)` | Dynamically modify unit attributes with auto type conversion |
+| `set_resources <camp> [dm] [al]` / `set_resources(camp, dm, al)` | Modify global strategic resource stockpiles (both/player/enemy) |
+| `create_unit <camp> <x> <y> [cfg] [id]` / `create_unit(camp, x, y, cfg, id)` | Dynamically spawn and deploy new units on battlefield |
 | `terminate` / `terminate()` | Terminate engine process |
 | `raw <json_or_plain>` | Send custom arbitrary JSON or `func(...)` payload |
 

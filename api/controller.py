@@ -7,6 +7,8 @@ import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable, Tuple
 from command.tactics_mode import TacticMode
+from physics.entities import Tank, Camp
+from tank_configs.config_loader import TankConfig
 
 logger = logging.getLogger("GameAPI")
 
@@ -45,6 +47,18 @@ class GameAPIController:
         # 优先级 20：目标交战与攻击
         "command_attack": 20,
         "attack": 20,
+        # 优先级 25：动态战术干预、属性修改、全局资源调整与创建单位
+        "edit_attr": 25,
+        "modify_attr": 25,
+        "set_attr": 25,
+        "set_resources": 25,
+        "modify_resources": 25,
+        "edit_resources": 25,
+        "set_resource": 25,
+        "update_resources": 25,
+        "create_unit": 25,
+        "spawn_unit": 25,
+        "add_unit": 25,
         # 优先级 30：战术机动与寻路
         "command_move": 30,
         "move": 30,
@@ -85,6 +99,14 @@ class GameAPIController:
         "get_converter": 50,
         "show_recipe": 50,
         "get_recipe": 50,
+        "get_mission_info": 50,
+        "mission_info": 50,
+        "briefing": 50,
+        "get_briefing": 50,
+        "get_game_time": 50,
+        "game_time": 50,
+        "get_time": 50,
+        "time": 50,
         "is_success": 50,
         "is_victory": 50,
         "success": 50,
@@ -493,6 +515,48 @@ class GameAPIController:
         elif action in ("list_resource_blocks", "get_resource_blocks", "resource_blocks", "blocks"):
             if len(pos_args) >= 1:
                 payload["unit_id"] = pos_args[0]
+        elif action in ("edit_attr", "modify_attr", "set_attr"):
+            if len(pos_args) >= 3:
+                payload["unit_ids"] = pos_args[0]
+                payload["attr"] = pos_args[1]
+                payload["value"] = pos_args[2]
+            elif len(pos_args) == 2:
+                payload["attr"] = pos_args[0]
+                payload["value"] = pos_args[1]
+        elif action in ("set_resources", "modify_resources", "edit_resources", "set_resource", "update_resources"):
+            if len(pos_args) == 1:
+                try:
+                    payload["dark_matter"] = float(pos_args[0])
+                except ValueError:
+                    payload["camp"] = pos_args[0]
+            elif len(pos_args) == 2:
+                try:
+                    payload["dark_matter"] = float(pos_args[0])
+                    payload["alloy"] = float(pos_args[1])
+                except ValueError:
+                    payload["camp"] = pos_args[0]
+                    try:
+                        payload["dark_matter"] = float(pos_args[1])
+                    except ValueError:
+                        payload["resources"] = pos_args[1]
+            elif len(pos_args) >= 3:
+                payload["camp"] = pos_args[0]
+                try:
+                    payload["dark_matter"] = float(pos_args[1])
+                    payload["alloy"] = float(pos_args[2])
+                except ValueError:
+                    payload["resource_type"] = pos_args[1]
+                    payload["amount"] = cls._to_number(pos_args[2])
+        elif action in ("create_unit", "spawn_unit", "add_unit"):
+            if len(pos_args) >= 1:
+                payload["camp"] = pos_args[0]
+            if len(pos_args) >= 3:
+                payload["x"] = cls._to_number(pos_args[1])
+                payload["y"] = cls._to_number(pos_args[2])
+            if len(pos_args) >= 4:
+                payload["config_file"] = pos_args[3]
+            if len(pos_args) >= 5:
+                payload["unit_id"] = pos_args[4]
 
         if pos_args:
             payload.setdefault("_pos_args", pos_args)
@@ -708,6 +772,22 @@ class GameAPIController:
             return self.command_stop_harvest(params)
         elif action in ("list_resource_blocks", "get_resource_blocks", "resource_blocks", "blocks"):
             return self.list_resource_blocks(params)
+
+        # 8. 任务信息与简报
+        elif action in ("get_mission_info", "mission_info", "briefing", "get_briefing"):
+            return self.get_mission_info(params)
+
+        # 9. 动态属性修改、全局资源设置与创建单位
+        elif action in ("edit_attr", "modify_attr", "set_attr"):
+            return self.edit_attr(params)
+        elif action in ("set_resources", "modify_resources", "edit_resources", "set_resource", "update_resources"):
+            return self.set_resources(params)
+        elif action in ("create_unit", "spawn_unit", "add_unit"):
+            return self.create_unit(params)
+
+        # 10. 引擎运行时间（暂停期间冻结）
+        elif action in ("get_game_time", "game_time", "get_time", "time"):
+            return self.get_game_time(params)
 
         # 辅助探针
         elif action in ("ping", "hello"):
@@ -1787,3 +1867,498 @@ class GameAPIController:
             blocks_data.append(item)
 
         return {"status": "ok", "blocks": blocks_data}
+
+    # ================= 8. api.get_mission_info =================
+
+    def get_mission_info(self, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        获取当前任务简报与地图尺寸信息（网格长宽、像素大小、坐标 x/y 上限）
+        """
+        mission = getattr(self.game_context, "mission", None)
+        game_map = getattr(self.game_context, "game_map", None)
+        if game_map is None and hasattr(self.game_context, "physics_engine"):
+            game_map = getattr(self.game_context.physics_engine, "game_map", None)
+
+        mission_name = getattr(mission, "name", "") if mission else ""
+        briefing = getattr(mission, "briefing", "") if mission else ""
+        map_file = getattr(mission, "map_file", "") if mission else ""
+        map_name = getattr(game_map, "name", "") if game_map else ""
+
+        cols = int(getattr(game_map, "cols", 0)) if game_map else 0
+        rows = int(getattr(game_map, "rows", 0)) if game_map else 0
+        tile_size = int(getattr(game_map, "tile_size", 36)) if game_map else 36
+        pixel_width = float(getattr(game_map, "pixel_width", cols * tile_size)) if game_map else 0.0
+        pixel_height = float(getattr(game_map, "pixel_height", rows * tile_size)) if game_map else 0.0
+
+        map_size_info = {
+            "cols": cols,
+            "rows": rows,
+            "grid_width": cols,
+            "grid_height": rows,
+            "tile_size": tile_size,
+            "pixel_width": pixel_width,
+            "pixel_height": pixel_height,
+            "max_x": pixel_width,
+            "max_y": pixel_height,
+            "max_col": cols,
+            "max_row": rows
+        }
+
+        return {
+            "status": "ok",
+            "mission_name": mission_name,
+            "briefing": briefing,
+            "map_name": map_name,
+            "map_file": map_file,
+            "cols": cols,
+            "rows": rows,
+            "tile_size": tile_size,
+            "pixel_width": pixel_width,
+            "pixel_height": pixel_height,
+            "max_x": pixel_width,
+            "max_y": pixel_height,
+            "map_size": map_size_info
+        }
+
+    # ================= 9. 动态属性修改、全局资源设置与创建单位 =================
+
+    @classmethod
+    def _auto_convert_value(cls, val: Any, existing_val: Any = None) -> Any:
+        """
+        自动类型推断与安全转换：
+        若目标属性存在既有类型，优先转换为既有类型；
+        否则自动尝试识别布尔、整型、浮点型、JSON 结构，最后保留原始值。
+        """
+        if val is None:
+            return None
+
+        # 优先参考目标属性既有值类型
+        if existing_val is not None:
+            if isinstance(existing_val, bool):
+                return cls._to_bool(val)
+            elif isinstance(existing_val, int):
+                try:
+                    return int(float(val))
+                except (ValueError, TypeError):
+                    pass
+            elif isinstance(existing_val, float):
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    pass
+            elif isinstance(existing_val, (list, tuple)):
+                if isinstance(val, (list, tuple)):
+                    return list(val)
+                if isinstance(val, str):
+                    try:
+                        parsed = json.loads(val)
+                        if isinstance(parsed, list):
+                            return parsed
+                    except Exception:
+                        pass
+                    return [x.strip() for x in val.split(",") if x.strip()]
+            elif isinstance(existing_val, dict):
+                if isinstance(val, dict):
+                    return val
+                if isinstance(val, str):
+                    try:
+                        parsed = json.loads(val)
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except Exception:
+                        pass
+
+        # 无既有类型参考时的通用自动推断
+        if isinstance(val, str):
+            s = val.strip()
+            if s.lower() in ("true", "false"):
+                return s.lower() == "true"
+            if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+                try:
+                    return json.loads(s)
+                except Exception:
+                    pass
+            try:
+                if "." not in s and "e" not in s.lower():
+                    return int(s)
+                return float(s)
+            except ValueError:
+                pass
+            return s
+
+        return val
+
+    @classmethod
+    def _resolve_config_path(cls, base_dir: Path, cfg_input: Optional[str], is_enemy: bool) -> Path:
+        """解析坦克配置模板文件路径，支持相对路径、文件名或纯名称 (如 'player_tank')"""
+        default_cfg = "tank_configs/enemy_basic.json" if is_enemy else "tank_configs/player_tank.json"
+        if not cfg_input:
+            path = base_dir / default_cfg
+            return path if path.exists() else Path(default_cfg)
+
+        cfg_str = str(cfg_input).strip()
+        candidates = [
+            base_dir / cfg_str,
+            Path(cfg_str),
+            base_dir / "tank_configs" / cfg_str,
+            base_dir / "tank_configs" / f"{cfg_str}.json",
+            Path("tank_configs") / f"{cfg_str}.json"
+        ]
+        for p in candidates:
+            if p.exists() and p.is_file():
+                return p
+
+        fallback = base_dir / default_cfg
+        return fallback if fallback.exists() else Path(default_cfg)
+
+    def edit_attr(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        动态更改当前对象的属性：
+        - 参数：
+          - unit_ids: 待修改的单位 ID（支持单个、逗号分隔、列表、'*'）
+          - attr: 待修改的属性字段名 (如 speed, health, ammo, controllable, angle 等)
+          - value: 待修改的属性值 (自动处理类型)
+        - 规则：
+          - 只有在一个对象也找不到的时候报错；
+          - 如果某个对象不存在这个属性则自动跳过。
+        """
+        unit_ids = (
+            params.get("unit_ids") or params.get("unit_id") or
+            params.get("id") or params.get("ids") or
+            params.get("target_id") or params.get("target_ids") or
+            params.get("_caller_unit_id")
+        )
+        attr = params.get("attr") or params.get("attribute") or params.get("field") or params.get("key") or params.get("prop")
+
+        has_val = False
+        val = None
+        for k in ("value", "val", "new_value", "target_value"):
+            if k in params:
+                val = params[k]
+                has_val = True
+                break
+
+        if not attr or not has_val:
+            return {
+                "status": "error",
+                "error": "Missing required parameters: 'attr' and 'value'"
+            }
+
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "No physics engine available"}
+
+        all_tanks = list(physics.player_tanks) + list(physics.enemy_tanks)
+
+        # 匹配目标单位
+        target_tanks = []
+        if not unit_ids or unit_ids in ("*", "all", "both"):
+            target_tanks = all_tanks
+        else:
+            strip_chars = "[]【】'\"“”‘’ \t\r\n"
+            if isinstance(unit_ids, str):
+                cleaned = unit_ids.strip(strip_chars)
+                ids = [i.strip(strip_chars) for i in cleaned.replace(",", " ").split() if i.strip(strip_chars)]
+            elif isinstance(unit_ids, (list, tuple)):
+                ids = [str(i).strip(strip_chars) for i in unit_ids if str(i).strip(strip_chars)]
+            else:
+                ids = [str(unit_ids).strip(strip_chars)]
+
+            target_set = set(ids)
+            target_tanks = [t for t in all_tanks if t.id in target_set]
+
+        # 只有在找不到任何一个匹配对象时才报错！
+        if not target_tanks:
+            return {
+                "status": "error",
+                "error": f"No matching units found for identifier '{unit_ids}'"
+            }
+
+        updated_units: List[str] = []
+        skipped_units: List[str] = []
+        details: List[Dict[str, Any]] = []
+
+        for tank in target_tanks:
+            if not hasattr(tank, attr):
+                skipped_units.append(tank.id)
+                continue
+
+            existing_val = getattr(tank, attr)
+            converted_val = self._auto_convert_value(val, existing_val)
+
+            try:
+                setattr(tank, attr, converted_val)
+
+                # 联动状态维护
+                if attr == "health":
+                    if tank.max_health < converted_val:
+                        tank.max_health = converted_val
+                    tank.alive = (converted_val > 0)
+                elif attr == "max_health":
+                    if tank.health > converted_val:
+                        tank.health = converted_val
+                elif attr == "ammo":
+                    if tank.max_ammo < converted_val and tank.max_ammo != -1:
+                        tank.max_ammo = converted_val
+                elif attr == "angle":
+                    tank.angle = float(converted_val) % 360.0
+                elif attr == "speed":
+                    tank.speed = max(0.0, float(converted_val))
+
+                updated_units.append(tank.id)
+                details.append({
+                    "unit_id": tank.id,
+                    "attr": attr,
+                    "old_value": existing_val,
+                    "new_value": converted_val
+                })
+            except Exception as e:
+                logger.warning("Failed to set attr '%s' on tank '%s': %s", attr, tank.id, e)
+                skipped_units.append(tank.id)
+
+        return {
+            "status": "ok",
+            "attr": attr,
+            "value": val,
+            "updated_units": updated_units,
+            "skipped_units": skipped_units,
+            "details": details
+        }
+
+    def set_resources(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        修改全局战略资源储备（支持对双方 player / enemy / both 分别或同时修改）：
+        - 参数：
+          - camp: 'player', 'enemy', 'both' / 'all' (缺省为 'both')
+          - resources: Dict[str, float] 如 {"dark_matter": 500, "alloy": 300}
+          - 或直接在参数中传入资源字段，如 dark_matter=500, alloy=300
+          - 或分别指定双方储备，如 player={"dark_matter": 500}, enemy={"dark_matter": 200}
+          - mode: 'set' (默认，直接设定), 'add' / 'delta' (增减)
+        """
+        res_mgr = getattr(self.game_context, "resource_manager", None)
+        if not res_mgr:
+            return {"status": "error", "error": "No resource manager available"}
+
+        mode = str(params.get("mode", "set")).lower()
+        camp = str(params.get("camp", "")).lower()
+
+        def apply_to_camp(c_name: str, res_dict: Dict[str, Any]):
+            c_key = res_mgr._normalize_camp(c_name)
+            for k, v in res_dict.items():
+                if k in ("status", "camp", "mode", "action", "id", "_pos_args"):
+                    continue
+                try:
+                    amt = float(v)
+                except (ValueError, TypeError):
+                    continue
+                if mode in ("add", "delta", "increment"):
+                    current = res_mgr.stockpiles[c_key].get(k, 0.0)
+                    res_mgr.stockpiles[c_key][k] = max(0.0, current + amt)
+                else:
+                    res_mgr.stockpiles.setdefault(c_key, {})[k] = max(0.0, amt)
+
+        # 1. 分别指定 player / enemy 字典的情况
+        if isinstance(params.get("player"), dict):
+            apply_to_camp("player", params["player"])
+        if isinstance(params.get("enemy"), dict):
+            apply_to_camp("enemy", params["enemy"])
+
+        # 2. 收集通用资源字典
+        res_payload: Dict[str, Any] = {}
+        if isinstance(params.get("resources"), dict):
+            res_payload.update(params["resources"])
+        elif isinstance(params.get("resources"), str):
+            try:
+                parsed = json.loads(params["resources"])
+                if isinstance(parsed, dict):
+                    res_payload.update(parsed)
+            except Exception:
+                pass
+
+        if "resource_type" in params and "amount" in params:
+            res_payload[str(params["resource_type"])] = params["amount"]
+
+        for r_name in ("dark_matter", "alloy"):
+            if r_name in params:
+                res_payload[r_name] = params[r_name]
+
+        # 3. 按 camp 阵营应用通用资源字典
+        if res_payload:
+            if camp in ("player", "allied", "ally"):
+                apply_to_camp("player", res_payload)
+            elif camp in ("enemy", "opponent"):
+                apply_to_camp("enemy", res_payload)
+            else:
+                # 默认 'both' / 'all'
+                apply_to_camp("player", res_payload)
+                apply_to_camp("enemy", res_payload)
+
+        return {
+            "status": "ok",
+            "mode": mode,
+            "stockpiles": res_mgr.get_both_stockpiles(),
+            "player": res_mgr.get_all_resources(camp="player"),
+            "enemy": res_mgr.get_all_resources(camp="enemy")
+        }
+
+    def create_unit(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        动态创建并部署全新作战单位（战车/防御塔）：
+        - 参数：
+          - camp: 'player' 或 'enemy' (缺省为 'player')
+          - config_file / unit_type: 配置文件路径或底盘类型名称 (如 'player_tank', 'enemy_fast', 'apocalypse_tank' 等)
+          - x, y: 部署像素坐标 (或 col, row 网格瓦片坐标)
+          - unit_id: 自定义唯一 ID (缺省自动分配)
+          - health, ammo, speed, angle, controllable, tactic, ai_script, vision_size, visibility 等可选属性覆盖
+        """
+        physics = getattr(self.game_context, "physics_engine", None)
+        if not physics:
+            return {"status": "error", "error": "No physics engine available"}
+
+        game_map = getattr(self.game_context, "game_map", None)
+        tile_size = getattr(game_map, "tile_size", 36) if game_map else 36
+        base_dir = getattr(self.game_context, "base_dir", None) or Path(".")
+
+        # 1. 确定阵营
+        camp_str = str(params.get("camp", "player")).lower()
+        is_enemy = "enemy" in camp_str
+        owner_camp = Camp.ENEMY if is_enemy else Camp.PLAYER
+
+        # 2. 确定配置模板
+        cfg_input = params.get("config_file") or params.get("config") or params.get("unit_type") or params.get("type")
+        cfg_file_path = self._resolve_config_path(base_dir, cfg_input, is_enemy)
+        try:
+            cfg = TankConfig.from_json(cfg_file_path)
+        except Exception as e:
+            return {"status": "error", "error": f"Failed to load config file '{cfg_file_path}': {e}"}
+
+        # 3. 确定部署坐标
+        x = params.get("x")
+        y = params.get("y")
+        if x is None or y is None:
+            col = params.get("col") or params.get("tile_x")
+            row = params.get("row") or params.get("tile_y")
+            if col is not None and row is not None:
+                x = float(col) * tile_size + (tile_size - cfg.size) / 2.0
+                y = float(row) * tile_size + (tile_size - cfg.size) / 2.0
+            else:
+                x = 100.0 if not is_enemy else 500.0
+                y = 100.0
+        else:
+            x = float(x)
+            y = float(y)
+
+        # 4. 生成或校验唯一 ID
+        all_existing_ids = {t.id for t in (physics.player_tanks + physics.enemy_tanks)}
+        unit_id = params.get("unit_id") or params.get("id")
+        if unit_id:
+            unit_id = str(unit_id).strip()
+            if unit_id in all_existing_ids:
+                return {"status": "error", "error": f"Unit ID '{unit_id}' already exists"}
+        else:
+            prefix = "enemy_unit" if is_enemy else "player_unit"
+            idx = 1
+            while f"{prefix}_{idx}" in all_existing_ids:
+                idx += 1
+            unit_id = f"{prefix}_{idx}"
+
+        # 5. 可覆盖属性解析
+        size = int(params.get("size", cfg.size))
+        speed = float(params.get("speed", cfg.speed))
+        health = int(params.get("health", cfg.health))
+        color = str(params.get("color", cfg.color))
+        angle = float(params.get("angle", 180.0 if is_enemy else 0.0))
+        ammo = int(params.get("ammo", -1 if is_enemy else 25))
+        vision_size = float(params.get("vision_size", 250.0 if is_enemy else 288.0))
+        visibility = float(params.get("visibility", 1.0))
+        controllable = self._to_bool(params.get("controllable", False if is_enemy else True))
+        tactic_name = str(params.get("tactic", "patrol")).lower()
+        ai_script = params.get("ai_script")
+
+        # 6. 实例化 Tank
+        new_tank = Tank(
+            x=x,
+            y=y,
+            size=size,
+            speed=speed,
+            camp=owner_camp,
+            color=color,
+            health=health,
+            tank_id=unit_id,
+            vision_size=vision_size,
+            ammo=ammo,
+            visibility=visibility,
+            is_tower=cfg.is_tower,
+            can_attack=cfg.can_attack,
+            tower_type=cfg.tower_type,
+            resupply_radius=cfg.resupply_radius,
+            resupply_interval=cfg.resupply_interval,
+            unit_type=cfg.name,
+            controllable=controllable,
+            ai_script=ai_script,
+            angle=angle,
+            can_crush_bricks=getattr(cfg, "can_crush_bricks", False),
+            crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5),
+            converter_table=getattr(cfg, "converter_table", []),
+            harvest_speed=getattr(cfg, "harvest_speed", None)
+        )
+        new_tank.fire_cooldown_max = cfg.fire_cooldown
+        new_tank._config = cfg
+
+        # 7. 注册到物理引擎、调度器与 AI 控制器
+        dispatcher = getattr(self.game_context, "command_dispatcher", None)
+        ai_controller = getattr(self.game_context, "ai_controller", None)
+
+        if is_enemy:
+            if ai_controller:
+                ai_controller.register_enemy(new_tank, cfg, tactic_name=tactic_name)
+            else:
+                physics.add_enemy_tank(new_tank)
+            if dispatcher:
+                dispatcher.register_tank(new_tank)
+        else:
+            physics.add_player_tank(new_tank)
+            if dispatcher:
+                dispatcher.register_tank(new_tank)
+
+        # 8. 战术脚本支持
+        if ai_script:
+            script_mgr = getattr(self.game_context, "ai_script_manager", None)
+            if script_mgr:
+                script_mgr.start_scripts([new_tank], self, base_dir)
+
+        return {
+            "status": "ok",
+            "unit_id": new_tank.id,
+            "camp": camp_str,
+            "x": round(new_tank.x, 1),
+            "y": round(new_tank.y, 1),
+            "health": new_tank.health,
+            "ammo": new_tank.ammo,
+            "speed": new_tank.speed,
+            "unit_type": new_tank.unit_type,
+            "config_file": str(cfg_file_path)
+        }
+
+    # ================= 10. api.get_game_time =================
+
+    def get_game_time(self, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        获取引擎活跃运行时间（毫秒数与秒数）：
+        在游戏暂停期间暂停计时（冻结当前累计毫秒数）。
+        """
+        cond_ctx = getattr(self.game_context, "condition_ctx", None)
+        elapsed_sec = float(getattr(cond_ctx, "elapsed_time", 0.0)) if cond_ctx else 0.0
+        elapsed_ms = int(round(elapsed_sec * 1000.0))
+
+        is_paused = bool(getattr(self.game_context, "is_paused", False))
+
+        return {
+            "status": "ok",
+            "game_time_ms": elapsed_ms,
+            "game_time_sec": round(elapsed_sec, 3),
+            "is_paused": is_paused
+        }
+
+
+

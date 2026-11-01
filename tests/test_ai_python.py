@@ -227,8 +227,9 @@ class TestMissionConfiguration(unittest.TestCase):
         self.assertEqual(mission.player_initial_resources, {"dark_matter": 0.0, "alloy": 0.0})
         self.assertEqual(mission.enemy_initial_resources, {"dark_matter": 0.0, "alloy": 0.0})
 
-        # 验证我方初始单位：一台基地车，一个雷达
-        self.assertEqual(len(mission.player_units), 2)
+        # 验证我方初始单位：一台基地车，一个雷达，一台防御炮塔
+        self.assertEqual(len(mission.player_units), 3)
+        self.assertTrue(len(mission.briefing) > 0)
         mcv = next((p for p in mission.player_units if p.id == "player_mcv"), None)
         self.assertIsNotNone(mcv)
         self.assertTrue(mcv.controllable)

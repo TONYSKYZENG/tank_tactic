@@ -122,9 +122,14 @@ class TestEditorComponents(unittest.TestCase):
         mission_widget._on_prop_changed()
         self.assertFalse(player_unit.controllable)
 
+        # Edit mission briefing
+        self.assertIsNotNone(mission_widget.edit_mission_briefing)
+        mission_widget.edit_mission_briefing.setPlainText("测试战役简报：固守待援，摧毁所有敌方坦克。")
+
         # Export mission data
         data = mission_widget.get_mission_data()
         self.assertEqual(data["name"], mission_widget.edit_mission_name.text())
+        self.assertEqual(data["briefing"], "测试战役简报：固守待援，摧毁所有敌方坦克。")
         self.assertEqual(len(data["player_units"]), 1)
         self.assertEqual(data["player_units"][0]["id"], "player_alpha")
         self.assertFalse(data["player_units"][0]["controllable"])
@@ -133,7 +138,9 @@ class TestEditorComponents(unittest.TestCase):
         new_m = mission_widget.create_new_mission(map_file="maps/custom.json", mission_name="Brand New Mission")
         self.assertEqual(new_m.name, "Brand New Mission")
         self.assertEqual(new_m.map_file, "maps/custom.json")
+        self.assertTrue(len(new_m.briefing) > 0)
         self.assertEqual(mission_widget.edit_mission_name.text(), "Brand New Mission")
+        self.assertEqual(mission_widget.edit_mission_briefing.toPlainText(), new_m.briefing)
         self.assertEqual(mission_widget.edit_map_file.text(), "maps/custom.json")
         self.assertEqual(len(mission_widget.player_units), 1)
         self.assertEqual(len(mission_widget.enemies), 1)

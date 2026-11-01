@@ -96,6 +96,8 @@ editor:
     dup_unit: "⎘ 复制单位"
     rules: "★ 任务环境规则"
     name: "任务名:"
+    briefing: "任务简报:"
+    briefing_placeholder: "输入任务背景与战术简报..."
     map_file: "地图文件:"
     fog: "启用战争迷雾系统 (Fog of War)"
     ammo: "启用有限弹药系统 (Limited Ammo)"

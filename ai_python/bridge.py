@@ -260,3 +260,62 @@ class TankScriptAPI:
         best_block = valid_blocks[0]
 
         return self.harvest(best_block["col"], best_block["row"], unit_id=target_uid)
+
+    def get_mission_info(self) -> Dict[str, Any]:
+        """获取当前战役任务简报、地图尺寸与坐标限制信息"""
+        return self._call("get_mission_info")
+
+    def edit_attr(self, unit_ids: Any, attr: str, value: Any) -> Dict[str, Any]:
+        """
+        动态更改当前对象的属性：
+        - unit_ids: 待修改的单位 ID（支持单个、列表、逗号分隔、'*'）
+        - attr: 待修改的属性字段名 (如 speed, health, ammo, controllable 等)
+        - value: 待修改的属性值（自动处理类型转换）
+        """
+        return self._call("edit_attr", unit_ids=unit_ids, attr=attr, value=value)
+
+    def set_resources(self, camp: str = "both", resources: Optional[Dict[str, float]] = None, **kwargs) -> Dict[str, Any]:
+        """
+        修改全局战略资源储备（支持对双方 player / enemy / both 修改）：
+        - camp: 'player', 'enemy', 'both' (缺省为 'both')
+        - resources: Dict[str, float] 如 {"dark_matter": 500, "alloy": 300}
+        - **kwargs: 可直接传入 dark_matter=500, alloy=300 等字段
+        """
+        params: Dict[str, Any] = {"camp": camp}
+        if resources is not None:
+            params["resources"] = resources
+        params.update(kwargs)
+        return self._call("set_resources", **params)
+
+    def create_unit(self, camp: str = "player", x: float = 0.0, y: float = 0.0,
+                    config_file: Optional[str] = None, unit_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """
+        动态创建并部署全新作战单位（战车/防御塔）：
+        - camp: 'player' 或 'enemy' (缺省为 'player')
+        - x, y: 部署像素坐标 (或 col, row 网格坐标)
+        - config_file: 配置文件路径或底盘名称 (如 'player_tank', 'enemy_fast' 等)
+        - unit_id: 自定义唯一 ID (可选)
+        - **kwargs: 可选属性覆盖 (health, ammo, speed, controllable, tactic, ai_script 等)
+        """
+        params: Dict[str, Any] = {"camp": camp, "x": x, "y": y}
+        if config_file is not None:
+            params["config_file"] = config_file
+        if unit_id is not None:
+            params["unit_id"] = unit_id
+        params.update(kwargs)
+        return self._call("create_unit", **params)
+
+    def get_game_time(self) -> Dict[str, Any]:
+        """
+        获取引擎活跃运行时间信息（毫秒数与秒数）：
+        在游戏暂停期间暂停计时（冻结当前累计毫秒数）。
+        """
+        return self._call("get_game_time")
+
+    def get_time_ms(self) -> int:
+        """便捷获取引擎当前活跃运行毫秒数（整数，暂停期间冻结）"""
+        info = self.get_game_time()
+        return int(info.get("game_time_ms", 0))
+
+
+

@@ -96,6 +96,8 @@ editor:
     dup_unit: "⎘ Duplicate"
     rules: "★ Mission Rules"
     name: "Mission Name:"
+    briefing: "Mission Briefing:"
+    briefing_placeholder: "Enter mission background and tactical briefing..."
     map_file: "Map File:"
     fog: "Enable Fog of War System"
     ammo: "Enable Limited Ammo System"

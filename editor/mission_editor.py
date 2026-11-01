@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QGroupBox, QSpinBox, QDoubleSpinBox, QLineEdit, QScrollArea, QFrame,
+    QGroupBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QScrollArea, QFrame,
     QCheckBox, QMessageBox, QListWidget, QListWidgetItem, QTabWidget
 )
 from PyQt5.QtGui import QFont, QColor
@@ -149,6 +149,19 @@ class MissionEditorWidget(QWidget):
         self.edit_mission_name.textChanged.connect(self._on_mission_meta_changed)
         m_name_layout.addWidget(self.edit_mission_name)
         global_layout.addLayout(m_name_layout)
+
+        # 任务简报
+        m_briefing_layout = QVBoxLayout()
+        self.lbl_m_briefing_tag = QLabel("任务简报:")
+        m_briefing_layout.addWidget(self.lbl_m_briefing_tag)
+        self.edit_mission_briefing = QPlainTextEdit()
+        self.edit_mission_briefing.setPlaceholderText("输入任务背景与战术简报...")
+        self.edit_mission_briefing.setMinimumHeight(65)
+        self.edit_mission_briefing.setMaximumHeight(120)
+        self.edit_mission_briefing.setStyleSheet("background-color: #151310; border: 1px solid #5C482C; color: #E0E0E0;")
+        self.edit_mission_briefing.textChanged.connect(self._on_mission_meta_changed)
+        m_briefing_layout.addWidget(self.edit_mission_briefing)
+        global_layout.addLayout(m_briefing_layout)
 
         # 关联地图路径
         m_map_layout = QHBoxLayout()
@@ -416,6 +429,8 @@ class MissionEditorWidget(QWidget):
 
         self.global_group.setTitle(t("editor.mission.rules"))
         self.lbl_m_name_tag.setText(t("editor.mission.name"))
+        self.lbl_m_briefing_tag.setText(t("editor.mission.briefing"))
+        self.edit_mission_briefing.setPlaceholderText(t("editor.mission.briefing_placeholder"))
         self.lbl_m_map_tag.setText(t("editor.mission.map_file"))
         self.chk_fog.setText(t("editor.mission.fog"))
         self.chk_ammo.setText(t("editor.mission.ammo"))
@@ -524,6 +539,7 @@ class MissionEditorWidget(QWidget):
             enemies=[default_enemy],
             fog_of_war=True,
             limited_ammo=True,
+            briefing="任务简报：消灭所有入侵敌军部队，守卫基地核心！",
             victory_conditions={"type": "all_enemies_destroyed"},
             defeat_conditions={"type": "all_players_destroyed"},
             initial_resources={"dark_matter": 100.0, "alloy": 50.0},
@@ -540,6 +556,7 @@ class MissionEditorWidget(QWidget):
     def set_mission(self, mission: Mission):
         self.current_mission = mission
         self.edit_mission_name.setText(mission.name)
+        self.edit_mission_briefing.setPlainText(getattr(mission, "briefing", "") or "")
         self.edit_map_file.setText(mission.map_file)
         self.chk_fog.setChecked(mission.fog_of_war)
         self.chk_ammo.setChecked(mission.limited_ammo)
@@ -606,6 +623,7 @@ class MissionEditorWidget(QWidget):
 
         m_dict = {
             "name": self.edit_mission_name.text().strip() or "Custom Mission",
+            "briefing": self.edit_mission_briefing.toPlainText().strip(),
             "map_file": self.edit_map_file.text().strip() or "maps/level_01.json",
             "fog_of_war": self.chk_fog.isChecked(),
             "limited_ammo": self.chk_ammo.isChecked(),

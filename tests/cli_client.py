@@ -198,6 +198,10 @@ Examples:
             payload = {"action": "api.restart"}
         elif cmd in ("status", "is_success", "api.is_success"):
             payload = {"action": "api.is_success"}
+        elif cmd in ("time", "game_time", "get_game_time", "api.get_game_time"):
+            payload = {"action": "api.get_game_time"}
+        elif cmd in ("mission_info", "get_mission_info", "briefing", "api.get_mission_info"):
+            payload = {"action": "api.get_mission_info"}
         elif cmd in ("list", "units", "list_current_unit_id", "api.list_current_unit_id"):
             payload = {"action": "api.list_current_unit_id"}
         elif cmd in ("list_enemy", "list_enemies", "enemies", "list_enemy_curr", "api.list_enemy_curr"):
@@ -296,6 +300,39 @@ Examples:
             payload = {"action": "api.terminate_convert"}
             if unit_id:
                 payload["unit_id"] = unit_id
+        elif cmd in ("edit_attr", "modify_attr", "api.edit_attr"):
+            if len(args) < 3:
+                print("❌ Usage: edit_attr <unit_ids> <attr> <value>")
+                return True
+            payload = {"action": "api.edit_attr", "unit_ids": clean_unit_ids(args[0]), "attr": args[1], "value": args[2]}
+        elif cmd in ("set_resources", "modify_resources", "edit_resources", "api.set_resources"):
+            if not args:
+                print("❌ Usage: set_resources <camp: player/enemy/both> [dark_matter] [alloy]")
+                return True
+            camp = args[0]
+            payload = {"action": "api.set_resources", "camp": camp}
+            if len(args) >= 2:
+                try:
+                    payload["dark_matter"] = float(args[1])
+                except ValueError:
+                    pass
+            if len(args) >= 3:
+                try:
+                    payload["alloy"] = float(args[2])
+                except ValueError:
+                    pass
+        elif cmd in ("create_unit", "spawn_unit", "api.create_unit"):
+            if len(args) < 3:
+                print("❌ Usage: create_unit <camp: player/enemy> <x> <y> [config_file] [unit_id]")
+                return True
+            camp = args[0]
+            x = float(args[1])
+            y = float(args[2])
+            payload = {"action": "api.create_unit", "camp": camp, "x": x, "y": y}
+            if len(args) >= 4:
+                payload["config_file"] = args[3]
+            if len(args) >= 5:
+                payload["unit_id"] = args[4]
         elif cmd == "raw":
             raw_str = " ".join(args)
             try:

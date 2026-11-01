@@ -226,18 +226,306 @@ class GameAPIController:
                 meta["seq"] = seq_num
             self._unit_last_command[uid] = meta
 
+    # ================= 原始 Plain 函数调用格式解析器 func(arg1, arg2, ...) =================
+
+    @classmethod
+    def _strip_paired_delimiters(cls, token: str) -> str:
+        """
+        若参数首尾为成对的引号 (" / ' / “” / ‘’) 或方括号 ([...] / 【...】)，
+        将其整体视为一个长字符串参数并自动掐头去尾。
+        """
+        s = token.strip()
+        if len(s) < 2:
+            return s
+        first, last = s[0], s[-1]
+        if (
+            (first == '"' and last == '"') or
+            (first == "'" and last == "'") or
+            (first in ('“', '”') and last in ('“', '”')) or
+            (first in ('‘', '’') and last in ('‘', '’')) or
+            (first == '[' and last == ']') or
+            (first == '【' and last == '】')
+        ):
+            return s[1:-1]
+        return s
+
+    @classmethod
+    def extract_plain_args(cls, args_str: str) -> Tuple[List[str], Dict[str, Any]]:
+        """
+        解析 func(arg1, arg2, ...) 括号内的参数列表：
+        - 识别成对的 " / ' / “” / ‘’ / [...] / 【...】，将成对定界符内部整体视为一个长字符串参数（内部逗号不切分），并自动掐头去尾；
+        - 同时支持位置参数与 key=value 命名参数。
+        """
+        s = args_str.strip()
+        if not s:
+            return [], {}
+
+        raw_tokens: List[str] = []
+        current: List[str] = []
+        in_quote: Optional[str] = None
+        bracket_depth = 0
+        paren_depth = 0
+        i = 0
+        n = len(s)
+
+        while i < n:
+            ch = s[i]
+            if in_quote is not None:
+                if ch == '\\' and i + 1 < n:
+                    current.append(s[i + 1])
+                    i += 2
+                    continue
+                if (
+                    (in_quote == '"' and ch == '"') or
+                    (in_quote == "'" and ch == "'") or
+                    (in_quote in ('“', '”') and ch in ('“', '”')) or
+                    (in_quote in ('‘', '’') and ch in ('‘', '’'))
+                ):
+                    in_quote = None
+                current.append(ch)
+            else:
+                if ch in ('"', "'", '“', '”', '‘', '’'):
+                    in_quote = ch
+                    current.append(ch)
+                elif ch in ('[', '【'):
+                    bracket_depth += 1
+                    current.append(ch)
+                elif ch in (']', '】') and bracket_depth > 0:
+                    bracket_depth -= 1
+                    current.append(ch)
+                elif ch == '(':
+                    paren_depth += 1
+                    current.append(ch)
+                elif ch == ')' and paren_depth > 0:
+                    paren_depth -= 1
+                    current.append(ch)
+                elif ch == ',' and bracket_depth == 0 and paren_depth == 0:
+                    raw_tokens.append("".join(current).strip())
+                    current = []
+                else:
+                    current.append(ch)
+            i += 1
+
+        tail = "".join(current).strip()
+        if tail or s.endswith(","):
+            if tail:
+                raw_tokens.append(tail)
+
+        pos_args: List[str] = []
+        kw_args: Dict[str, Any] = {}
+
+        for tok in raw_tokens:
+            if not tok:
+                continue
+            first_ch = tok[0]
+            # 检查是否为顶层 key=value 形式（且未以引号或方括号开头）
+            if first_ch not in ('"', "'", '“', '”', '‘', '’', '[', '【') and '=' in tok:
+                k, v = tok.split('=', 1)
+                k_clean = k.strip()
+                if k_clean.isidentifier():
+                    kw_args[k_clean] = cls._strip_paired_delimiters(v.strip())
+                    continue
+            pos_args.append(cls._strip_paired_delimiters(tok))
+
+        return pos_args, kw_args
+
+    @classmethod
+    def _to_number(cls, val: str, as_int: bool = False) -> Any:
+        try:
+            f = float(val)
+            return int(f) if as_int else f
+        except (ValueError, TypeError):
+            return val
+
+    @classmethod
+    def _to_bool(cls, val: Any) -> bool:
+        if isinstance(val, bool):
+            return val
+        return str(val).strip().lower() in ("true", "1", "god", "all", "yes", "cheat", "--god", "-g")
+
+    @classmethod
+    def parse_plain_api_call(cls, raw_call: str) -> Optional[Dict[str, Any]]:
+        """
+        将 `func(arg1, arg2, ...)` 或 `api.func(arg1, arg2, ...)` 纯文本调用解析为标准 API 请求字典。
+        若不是合法的 func(...) 格式则返回 None。
+        """
+        s = raw_call.strip()
+        if s.endswith(";"):
+            s = s[:-1].strip()
+        if not s or s.startswith("{") or s.startswith("["):
+            return None
+
+        open_idx = s.find("(")
+        if open_idx <= 0 or not s.endswith(")"):
+            return None
+
+        func_name = s[:open_idx].strip()
+        if not all(c.isalnum() or c in ('_', '.') for c in func_name):
+            return None
+
+        args_body = s[open_idx + 1:-1]
+        pos_args, kw_args = cls.extract_plain_args(args_body)
+
+        action = func_name.lower()
+        if action.startswith("api."):
+            action = action[4:]
+
+        payload: Dict[str, Any] = {"action": func_name}
+        payload.update(kw_args)
+
+        # 按各 API 动作规范映射位置参数
+        if action in ("list_current_unit_id", "list_units", "list_player_units", "units", "list"):
+            if len(pos_args) >= 1:
+                payload["god_mode"] = cls._to_bool(pos_args[0])
+        elif action in ("list_enemy_curr", "list_enemies", "list_enemy", "enemies"):
+            if len(pos_args) >= 1:
+                is_god = cls._to_bool(pos_args[0])
+                payload["god_mode"] = is_god
+                payload["mode"] = "god" if is_god else pos_args[0]
+        elif action in ("report", "unit_report", "get_status", "report_enemy", "enemy_report"):
+            if len(pos_args) >= 1:
+                payload["unit_id"] = pos_args[0]
+        elif action in ("command_move", "move"):
+            if len(pos_args) == 2:
+                payload.setdefault("unit_ids", "*")
+                payload["x"] = cls._to_number(pos_args[0])
+                payload["y"] = cls._to_number(pos_args[1])
+            elif len(pos_args) >= 3:
+                payload["unit_ids"] = pos_args[0]
+                payload["x"] = cls._to_number(pos_args[1])
+                payload["y"] = cls._to_number(pos_args[2])
+                if len(pos_args) >= 4:
+                    payload["seq"] = cls._to_number(pos_args[3], as_int=True)
+        elif action in ("command_attack", "attack"):
+            if len(pos_args) == 1:
+                payload.setdefault("unit_ids", "*")
+                payload["target_id"] = pos_args[0]
+            elif len(pos_args) == 2:
+                payload["unit_ids"] = pos_args[0]
+                payload["target_id"] = pos_args[1]
+            elif len(pos_args) >= 3:
+                payload["unit_ids"] = pos_args[0]
+                try:
+                    payload["x"] = float(pos_args[1])
+                    payload["y"] = float(pos_args[2])
+                except ValueError:
+                    payload["target_id"] = pos_args[1]
+                    payload["god_mode"] = cls._to_bool(pos_args[2])
+        elif action in ("command_fire", "fire"):
+            if len(pos_args) == 0:
+                payload.setdefault("unit_ids", "*")
+            elif len(pos_args) == 1:
+                payload["unit_ids"] = pos_args[0]
+            elif len(pos_args) >= 2:
+                payload["unit_ids"] = pos_args[0]
+                try:
+                    payload["angle"] = float(pos_args[1])
+                except ValueError:
+                    payload["direction"] = pos_args[1]
+        elif action in ("command_set_tactic", "set_tactic", "tactic"):
+            if len(pos_args) == 1:
+                payload.setdefault("unit_ids", "*")
+                payload["tactic"] = pos_args[0]
+            elif len(pos_args) >= 2:
+                payload["unit_ids"] = pos_args[0]
+                payload["tactic"] = pos_args[1]
+                if len(pos_args) >= 3:
+                    payload["guard_target_id"] = pos_args[2]
+        elif action in ("command_set_guard", "set_guard", "guard"):
+            if len(pos_args) == 1:
+                payload.setdefault("unit_ids", "*")
+                payload["target_id"] = pos_args[0]
+            elif len(pos_args) >= 2:
+                payload["unit_ids"] = pos_args[0]
+                payload["target_id"] = pos_args[1]
+        elif action in ("command_stop", "stop"):
+            if len(pos_args) == 0:
+                payload.setdefault("unit_ids", "*")
+            else:
+                payload["unit_ids"] = pos_args[0]
+        elif action in ("find_path", "path"):
+            if len(pos_args) == 2:
+                payload["x"] = cls._to_number(pos_args[0])
+                payload["y"] = cls._to_number(pos_args[1])
+            elif len(pos_args) == 3:
+                payload["unit_id"] = pos_args[0]
+                payload["x"] = cls._to_number(pos_args[1])
+                payload["y"] = cls._to_number(pos_args[2])
+            elif len(pos_args) >= 4:
+                payload["start_x"] = cls._to_number(pos_args[0])
+                payload["start_y"] = cls._to_number(pos_args[1])
+                payload["x"] = cls._to_number(pos_args[2])
+                payload["y"] = cls._to_number(pos_args[3])
+        elif action in ("list_opponents", "opponents", "get_opponents", "list_allies", "allies", "get_allies"):
+            if len(pos_args) >= 1:
+                if pos_args[0].lower() in ("player", "enemy"):
+                    payload["camp"] = pos_args[0].lower()
+                else:
+                    payload["unit_id"] = pos_args[0]
+        elif action in ("show_converter", "get_converter", "show_recipe", "get_recipe", "converter_detail", "recipe", "converter"):
+            if len(pos_args) >= 1:
+                payload["converter_id"] = pos_args[0]
+        elif action in ("convert", "start_convert"):
+            if len(pos_args) >= 2:
+                payload["unit_id"] = pos_args[0]
+                payload["recipe_id"] = pos_args[1]
+                if len(pos_args) >= 3:
+                    payload["count"] = cls._to_number(pos_args[2], as_int=True)
+        elif action in ("terminate_convert", "cancel_convert", "clear_convert"):
+            if len(pos_args) >= 1:
+                payload["unit_id"] = pos_args[0]
+        elif action in ("get_resources", "resources", "list_resources", "res"):
+            if len(pos_args) >= 1:
+                payload["camp"] = pos_args[0]
+        elif action in ("harvest", "start_harvest", "command_harvest"):
+            if len(pos_args) == 2:
+                payload["col"] = cls._to_number(pos_args[0], as_int=True)
+                payload["row"] = cls._to_number(pos_args[1], as_int=True)
+            elif len(pos_args) >= 3:
+                payload["unit_id"] = pos_args[0]
+                payload["unit_ids"] = pos_args[0]
+                payload["col"] = cls._to_number(pos_args[1], as_int=True)
+                payload["row"] = cls._to_number(pos_args[2], as_int=True)
+        elif action in ("stop_harvest", "command_stop_harvest", "cancel_harvest"):
+            if len(pos_args) >= 1:
+                payload["unit_id"] = pos_args[0]
+                payload["unit_ids"] = pos_args[0]
+        elif action in ("list_resource_blocks", "get_resource_blocks", "resource_blocks", "blocks"):
+            if len(pos_args) >= 1:
+                payload["unit_id"] = pos_args[0]
+
+        if pos_args:
+            payload.setdefault("_pos_args", pos_args)
+
+        return payload
+
+    def is_valid_plain_call(self, raw_data: str) -> bool:
+        """检查输入字符串是否为合法的 func(arg1, arg2, ...) 纯文本调用格式"""
+        return self.parse_plain_api_call(raw_data) is not None
+
     def handle_request(self, raw_data: str) -> str:
         """
-        接收纯文本 JSON 请求（支持单个请求对象、批次请求列表，或带有 batch 动作的指令包），
+        接收纯文本 JSON 请求或原始 plain 函数调用格式 `func(arg1, arg2, ...)`
+        （支持单个请求、批次请求列表，或带有 batch 动作的指令包），
         在并发安全锁保护下执行简单排序机制并返回处理结果。
         """
         if not raw_data or not raw_data.strip():
             return json.dumps({"status": "error", "error": "Empty request"}, ensure_ascii=False)
 
-        try:
-            payload = json.loads(raw_data)
-        except Exception as e:
-            return json.dumps({"status": "error", "error": f"Invalid JSON format: {str(e)}"}, ensure_ascii=False)
+        stripped = raw_data.strip()
+        payload = None
+
+        # 优先识别 func(arg1, arg2, ...) 原始 plain 函数调用格式
+        if not stripped.startswith("{") and not stripped.startswith("["):
+            plain_payload = self.parse_plain_api_call(stripped)
+            if plain_payload is not None:
+                payload = plain_payload
+
+        if payload is None:
+            try:
+                payload = json.loads(stripped)
+            except Exception as e:
+                return json.dumps({"status": "error", "error": f"Invalid JSON or plain call format: {str(e)}"}, ensure_ascii=False)
 
         with self.lock:
             # 1. 数组形式的批次请求：如 [{"action": "move", ...}, {"action": "attack", ...}]
@@ -261,12 +549,23 @@ class GameAPIController:
             # 3. 单个常规指令处理
             return self._handle_single_request(payload)
 
+    def _normalize_batch_items(self, items: List[Any]) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        for item in items:
+            if isinstance(item, dict):
+                normalized.append(item)
+            elif isinstance(item, str):
+                parsed = self.parse_plain_api_call(item)
+                if parsed is not None:
+                    normalized.append(parsed)
+        return normalized
+
     def _handle_batch_list(self, payloads: List[Any]) -> str:
         """
         并发安全执行批次请求列表：
         按优先级与次序进行简单排序后执行
         """
-        valid_items = [p for p in payloads if isinstance(p, dict)]
+        valid_items = self._normalize_batch_items(payloads)
         sorted_items = self._sort_requests(valid_items)
         results = []
         for item in sorted_items:
@@ -282,7 +581,7 @@ class GameAPIController:
         """
         处理 {"action": "batch", "commands": [...]} 形式的批次请求
         """
-        valid_cmds = [c for c in commands if isinstance(c, dict)]
+        valid_cmds = self._normalize_batch_items(commands)
         sorted_cmds = self._sort_requests(valid_cmds)
         executed_results = []
         for cmd in sorted_cmds:
@@ -349,7 +648,7 @@ class GameAPIController:
             return self.is_paused(params)
 
         # 2. 判断胜利条件
-        elif action in ("is_success", "is_victory", "success"):
+        elif action in ("is_success", "is_victory", "success", "status"):
             return self.is_success(params)
 
         # 3. 终结引擎与后台
@@ -359,9 +658,9 @@ class GameAPIController:
             return self.restart(params)
 
         # 4. 列出当前存活己方单位 ID (逗号隔开，带辨识度 visibility 概率过滤)
-        elif action in ("list_current_unit_id", "list_units", "list_player_units"):
+        elif action in ("list_current_unit_id", "list_units", "list_player_units", "units", "list"):
             return self.list_current_unit_id(params)
-        elif action in ("list_enemy_curr", "list_enemies", "list_enemy"):
+        elif action in ("list_enemy_curr", "list_enemies", "list_enemy", "enemies"):
             return self.list_enemy_curr(params)
         elif action in ("list_enemy_mem", "enemy_mem", "list_memory", "memory"):
             return self.list_enemy_mem(params)
@@ -379,6 +678,8 @@ class GameAPIController:
             return self.command_set_tactic(params)
         elif action in ("command_set_guard", "set_guard", "guard"):
             return self.command_set_guard(params)
+        elif action in ("command_stop", "stop"):
+            return self.command_set_tactic({**params, "tactic": "stop"})
 
         # 6. 查询单位完整属性报告与全知情报
         elif action in ("report", "unit_report", "get_status"):
@@ -391,21 +692,21 @@ class GameAPIController:
             return self.find_path(params)
 
         # 7. 经济系统、配方转换与资源开采
-        elif action in ("list_converter", "list_converters", "list_recipes", "list_converter_id", "list_converter_ids"):
+        elif action in ("list_converter", "list_converters", "list_recipes", "list_converter_id", "list_converter_ids", "converters", "recipes"):
             return self.list_converter(params)
-        elif action in ("show_converter", "get_converter", "show_recipe", "get_recipe", "converter_detail"):
+        elif action in ("show_converter", "get_converter", "show_recipe", "get_recipe", "converter_detail", "recipe", "converter"):
             return self.show_converter(params)
         elif action in ("convert", "start_convert"):
             return self.convert(params)
         elif action in ("terminate_convert", "cancel_convert", "clear_convert"):
             return self.terminate_convert(params)
-        elif action in ("get_resources", "resources", "list_resources"):
+        elif action in ("get_resources", "resources", "list_resources", "res"):
             return self.get_resources(params)
         elif action in ("harvest", "start_harvest", "command_harvest"):
             return self.command_harvest(params)
         elif action in ("stop_harvest", "command_stop_harvest", "cancel_harvest"):
             return self.command_stop_harvest(params)
-        elif action in ("list_resource_blocks", "get_resource_blocks", "resource_blocks"):
+        elif action in ("list_resource_blocks", "get_resource_blocks", "resource_blocks", "blocks"):
             return self.list_resource_blocks(params)
 
         # 辅助探针
@@ -665,13 +966,14 @@ class GameAPIController:
         if not unit_ids_param:
             return all_player_tanks
 
+        strip_chars = "[]【】'\"“”‘’ \t\r\n"
         if isinstance(unit_ids_param, str):
-            cleaned = unit_ids_param.strip("[] \t\r\n")
-            ids = [i.strip("[] \t\r\n") for i in cleaned.replace(",", " ").split() if i.strip("[] \t\r\n")]
+            cleaned = unit_ids_param.strip(strip_chars)
+            ids = [i.strip(strip_chars) for i in cleaned.replace(",", " ").split() if i.strip(strip_chars)]
         elif isinstance(unit_ids_param, (list, tuple)):
-            ids = [str(i).strip("[] \t\r\n") for i in unit_ids_param if str(i).strip("[] \t\r\n")]
+            ids = [str(i).strip(strip_chars) for i in unit_ids_param if str(i).strip(strip_chars)]
         else:
-            ids = [str(unit_ids_param).strip("[] \t\r\n")]
+            ids = [str(unit_ids_param).strip(strip_chars)]
 
         if "*" in ids or "all" in ids:
             return all_player_tanks

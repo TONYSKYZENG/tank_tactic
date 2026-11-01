@@ -3,13 +3,15 @@ from typing import Optional, Dict, Any, List, Union, Tuple
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QGroupBox, QSpinBox, QDoubleSpinBox, QLineEdit, QTreeWidget, QTreeWidgetItem,
-    QSplitter, QPlainTextEdit, QMessageBox, QTabWidget, QHeaderView, QFrame, QMenu
+    QSplitter, QPlainTextEdit, QMessageBox, QTabWidget, QHeaderView, QFrame, QMenu,
+    QScrollArea
 )
 from PyQt5.QtGui import QFont, QColor, QIcon
 from PyQt5.QtCore import Qt, pyqtSignal
 
 from conditions.builder import ConditionBuilder
 from translations import i18n, t
+from .theme import install_sidebar_wheel_guard
 
 class ConditionNodeType:
     # 复合逻辑节点
@@ -101,18 +103,32 @@ class ConditionEditorWidget(QWidget):
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.tab_widget)
 
-        # 右侧：属性检视面板 + 实时 JSON
+        # 右侧：属性检视面板 + 实时 JSON (带页面滚轮 QScrollArea)
         right_panel = QFrame()
+        right_panel.setObjectName("right_panel")
         right_panel.setFixedWidth(380)
-        right_panel.setStyleSheet("background-color: #221E19; border: 1px solid #4D3C26; border-radius: 4px;")
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(10, 10, 10, 10)
-        right_layout.setSpacing(12)
+        right_panel.setStyleSheet("QFrame#right_panel { background-color: #221E19; border: 1px solid #4D3C26; border-radius: 4px; }")
+        right_panel_layout = QVBoxLayout(right_panel)
+        right_panel_layout.setContentsMargins(6, 6, 6, 6)
+        right_panel_layout.setSpacing(6)
 
         self.prop_title = QLabel("⚙ 条件节点参数配置")
         self.prop_title.setFont(QFont("Palatino", 13, QFont.Bold))
-        self.prop_title.setStyleSheet("color: #F1C40F; border: none;")
-        right_layout.addWidget(self.prop_title)
+        self.prop_title.setStyleSheet("color: #F1C40F; border: none; padding-left: 4px;")
+        right_panel_layout.addWidget(self.prop_title)
+
+        self.right_scroll_area = QScrollArea()
+        self.right_scroll_area.setWidgetResizable(True)
+        self.right_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.right_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.right_scroll_area.setStyleSheet("QScrollArea { border: 1px solid #3E301E; background-color: #191612; }")
+        self.prop_scroll_area = self.right_scroll_area
+
+        right_container = QWidget()
+        right_container.setStyleSheet("background-color: transparent;")
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(8, 8, 8, 8)
+        right_layout.setSpacing(12)
 
         # 节点属性编辑表单
         self.prop_box = QGroupBox("选中节点参数")
@@ -229,6 +245,7 @@ class ConditionEditorWidget(QWidget):
 
         self.txt_json_preview = QPlainTextEdit()
         self.txt_json_preview.setReadOnly(True)
+        self.txt_json_preview.setMinimumHeight(180)
         self.txt_json_preview.setStyleSheet("font-family: 'Courier New'; font-size: 11px; background: #12100E; color: #58D68D; border: 1px solid #3E301E;")
         json_layout.addWidget(self.txt_json_preview)
 
@@ -238,6 +255,11 @@ class ConditionEditorWidget(QWidget):
         json_layout.addWidget(self.btn_validate)
 
         right_layout.addWidget(self.json_group)
+        right_layout.addStretch()
+
+        self.right_scroll_area.setWidget(right_container)
+        install_sidebar_wheel_guard(self.right_scroll_area, right_container)
+        right_panel_layout.addWidget(self.right_scroll_area, stretch=1)
 
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 3)

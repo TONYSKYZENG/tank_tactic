@@ -11,13 +11,14 @@ import argparse
 from typing import Optional, List, Tuple, Any
 
 def clean_unit_ids(val: Any) -> str:
-    """清理并规整输入的单位 ID 参数（去除方括号、统一逗号分割）"""
+    """清理并规整输入的单位 ID 参数（去除首尾成对引号/方括号、统一逗号分割）"""
     if not val:
         return ""
+    strip_chars = "[]【】'\"“”‘’ \t\r\n"
     if isinstance(val, (list, tuple)):
-        return ",".join(str(v).strip("[] \t\r\n") for v in val if str(v).strip("[] \t\r\n"))
-    s = str(val).strip("[] \t\r\n")
-    parts = [p.strip("[] \t\r\n") for p in s.replace(",", " ").split() if p.strip("[] \t\r\n")]
+        return ",".join(str(v).strip(strip_chars) for v in val if str(v).strip(strip_chars))
+    s = str(val).strip(strip_chars)
+    parts = [p.strip(strip_chars) for p in s.replace(",", " ").split() if p.strip(strip_chars)]
     return ",".join(parts)
 
 
@@ -173,6 +174,15 @@ Examples:
             resp = self.send_request(payload)
             self._print_response(resp)
             return True
+
+        # 如果输入了 func(arg1, arg2, ...) 原始 plain 函数调用格式
+        if "(" in line and (line.endswith(")") or line.endswith(");")):
+            from api.controller import GameAPIController
+            plain_payload = GameAPIController.parse_plain_api_call(line)
+            if plain_payload is not None:
+                resp = self.send_request(plain_payload)
+                self._print_response(resp)
+                return True
 
         cmd, args = self.parse_command_line(line)
         if not cmd:

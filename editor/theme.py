@@ -274,3 +274,36 @@ QCheckBox::indicator:checked {
     border: 1px solid #FFD97D;
 }
 """
+
+from PyQt5.QtCore import QObject, QEvent, Qt
+from PyQt5.QtWidgets import QApplication, QScrollArea, QWidget, QAbstractSpinBox, QComboBox
+
+
+class SidebarWheelFilter(QObject):
+    """
+    让侧边工具栏内的 SpinBox / DoubleSpinBox / ComboBox 在未主动聚焦时不劫持鼠标滚轮事件，
+    而是将滚轮事件转发给所属 QScrollArea 的垂直滚动条，保证侧边工具栏页面上下滚轮顺畅滚动。
+    """
+
+    def __init__(self, scroll_area: QScrollArea, parent: QObject = None):
+        super().__init__(parent or scroll_area)
+        self.scroll_area = scroll_area
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Wheel:
+            if isinstance(obj, QWidget) and not obj.hasFocus():
+                if self.scroll_area is not None and self.scroll_area.verticalScrollBar() is not None:
+                    QApplication.sendEvent(self.scroll_area.verticalScrollBar(), event)
+                    return True
+        return super().eventFilter(obj, event)
+
+
+def install_sidebar_wheel_guard(scroll_area: QScrollArea, container: QWidget) -> SidebarWheelFilter:
+    """为可滚动侧边栏内的所有数值框与下拉框安装滚轮穿透保护"""
+    wheel_filter = SidebarWheelFilter(scroll_area, container)
+    for w in container.findChildren((QAbstractSpinBox, QComboBox)):
+        w.setFocusPolicy(Qt.StrongFocus)
+        w.installEventFilter(wheel_filter)
+    scroll_area._wheel_filter = wheel_filter
+    return wheel_filter
+

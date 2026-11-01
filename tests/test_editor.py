@@ -76,6 +76,8 @@ class TestEditorComponents(unittest.TestCase):
         canvas = EditorCanvas(self.game_map)
         map_widget = MapEditorWidget(canvas)
         self.assertIsNotNone(map_widget.canvas)
+        self.assertIsNotNone(map_widget.left_scroll_area)
+        self.assertTrue(map_widget.left_scroll_area.widgetResizable())
         
         # Test resizing map via spin boxes and apply button
         map_widget.spin_cols.setValue(15)
@@ -92,7 +94,9 @@ class TestEditorComponents(unittest.TestCase):
         canvas = EditorCanvas(self.game_map)
         mission_widget = MissionEditorWidget(canvas, BASE_DIR)
         
-        # Check that property inspector is in a QScrollArea (user requirement: scrollable property inspector)
+        # Check that both left toolbar and right property inspector are in a QScrollArea
+        self.assertIsNotNone(mission_widget.left_scroll_area)
+        self.assertTrue(mission_widget.left_scroll_area.widgetResizable())
         self.assertIsNotNone(mission_widget.prop_scroll_area)
         self.assertTrue(mission_widget.prop_scroll_area.widgetResizable())
 
@@ -136,6 +140,8 @@ class TestEditorComponents(unittest.TestCase):
 
     def test_condition_editor_widget(self):
         cond_widget = ConditionEditorWidget()
+        self.assertIsNotNone(cond_widget.right_scroll_area)
+        self.assertTrue(cond_widget.right_scroll_area.widgetResizable())
 
         # Load condition dictionaries into tree
         vic_config = {

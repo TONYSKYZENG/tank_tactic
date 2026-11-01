@@ -15,6 +15,7 @@ from tank_configs.config_loader import TankConfig
 from resource.loader import ResourceLoader
 from translations import i18n, t
 from .canvas import EditorCanvas, EditorMode
+from .theme import install_sidebar_wheel_guard
 
 class MissionEditorWidget(QWidget):
     """
@@ -79,18 +80,31 @@ class MissionEditorWidget(QWidget):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(10)
 
-        # ===== 左侧单位管理器面板 =====
+        # ===== 左侧单位管理器面板 (带页面滚轮 QScrollArea) =====
         left_panel = QFrame()
-        left_panel.setFixedWidth(280)
-        left_panel.setStyleSheet("background-color: #221E19; border: 1px solid #4D3C26; border-radius: 4px;")
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(10, 10, 10, 10)
-        left_layout.setSpacing(10)
+        left_panel.setObjectName("left_panel")
+        left_panel.setFixedWidth(300)
+        left_panel.setStyleSheet("QFrame#left_panel { background-color: #221E19; border: 1px solid #4D3C26; border-radius: 4px; }")
+        left_panel_layout = QVBoxLayout(left_panel)
+        left_panel_layout.setContentsMargins(6, 6, 6, 6)
+        left_panel_layout.setSpacing(6)
 
         self.title_label = QLabel("🛡 任务单位编队管理")
         self.title_label.setFont(QFont("Palatino", 13, QFont.Bold))
-        self.title_label.setStyleSheet("color: #E6C66E; border: none;")
-        left_layout.addWidget(self.title_label)
+        self.title_label.setStyleSheet("color: #E6C66E; border: none; padding-left: 4px;")
+        left_panel_layout.addWidget(self.title_label)
+
+        self.left_scroll_area = QScrollArea()
+        self.left_scroll_area.setWidgetResizable(True)
+        self.left_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.left_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.left_scroll_area.setStyleSheet("QScrollArea { border: 1px solid #3E301E; background-color: #191612; }")
+
+        left_container = QWidget()
+        left_container.setStyleSheet("background-color: transparent;")
+        left_layout = QVBoxLayout(left_container)
+        left_layout.setContentsMargins(8, 8, 8, 8)
+        left_layout.setSpacing(10)
 
         # 1. 单位快捷放置按钮
         btn_layout = QHBoxLayout()
@@ -107,6 +121,7 @@ class MissionEditorWidget(QWidget):
 
         # 2. 单位列表
         self.unit_list = QListWidget()
+        self.unit_list.setMinimumHeight(150)
         self.unit_list.setStyleSheet("background-color: #151310; border: 1px solid #5C482C;")
         self.unit_list.currentRowChanged.connect(self._on_unit_list_selection_changed)
         left_layout.addWidget(self.unit_list, stretch=1)
@@ -202,6 +217,10 @@ class MissionEditorWidget(QWidget):
         res_layout.addWidget(self.lbl_res_summary)
 
         left_layout.addWidget(self.res_group)
+        left_layout.addStretch()
+        self.left_scroll_area.setWidget(left_container)
+        install_sidebar_wheel_guard(self.left_scroll_area, left_container)
+        left_panel_layout.addWidget(self.left_scroll_area, stretch=1)
         main_layout.addWidget(left_panel)
 
         # ===== 中间地图画布视口 =====
@@ -214,8 +233,9 @@ class MissionEditorWidget(QWidget):
 
         # ===== 右侧：可滚动的属性设置区域 (Scrollable Property Inspector) =====
         right_panel = QFrame()
+        right_panel.setObjectName("right_panel")
         right_panel.setFixedWidth(340)
-        right_panel.setStyleSheet("background-color: #221E19; border: 1px solid #4D3C26; border-radius: 4px;")
+        right_panel.setStyleSheet("QFrame#right_panel { background-color: #221E19; border: 1px solid #4D3C26; border-radius: 4px; }")
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(6, 6, 6, 6)
         right_layout.setSpacing(6)
@@ -228,9 +248,12 @@ class MissionEditorWidget(QWidget):
         # ★★★ 关键要求：属性设置区域上下滚动 ★★★
         self.prop_scroll_area = QScrollArea()
         self.prop_scroll_area.setWidgetResizable(True)
+        self.prop_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.prop_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.prop_scroll_area.setStyleSheet("QScrollArea { border: 1px solid #3E301E; background-color: #191612; }")
 
         prop_container = QWidget()
+        prop_container.setStyleSheet("background-color: transparent;")
         self.prop_layout = QVBoxLayout(prop_container)
         self.prop_layout.setContentsMargins(8, 8, 8, 8)
         self.prop_layout.setSpacing(12)
@@ -372,7 +395,8 @@ class MissionEditorWidget(QWidget):
 
         self.prop_layout.addStretch()
         self.prop_scroll_area.setWidget(prop_container)
-        right_layout.addWidget(self.prop_scroll_area)
+        install_sidebar_wheel_guard(self.prop_scroll_area, prop_container)
+        right_layout.addWidget(self.prop_scroll_area, stretch=1)
 
         main_layout.addWidget(right_panel)
 

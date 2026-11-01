@@ -72,7 +72,7 @@ class RawTCPIPServer(QObject):
             if line_str:
                 self._process_message(client, line_str)
 
-        # 2. 若缓冲区无换行但构成闭合的 JSON 对象，则立即处理
+        # 2. 若缓冲区无换行但构成闭合的 JSON 对象或完整的 func(...) plain 调用，则立即处理
         stripped = buf.strip()
         if stripped.startswith(b"{") and stripped.endswith(b"}"):
             try:
@@ -80,6 +80,14 @@ class RawTCPIPServer(QObject):
                 json.loads(json_str)  # 尝试校验完整性
                 self._process_message(client, json_str)
                 buf = bytearray()
+            except Exception:
+                pass
+        elif b"(" in stripped and (stripped.endswith(b")") or stripped.endswith(b");")):
+            try:
+                plain_str = stripped.decode("utf-8")
+                if hasattr(self.api_controller, "is_valid_plain_call") and self.api_controller.is_valid_plain_call(plain_str):
+                    self._process_message(client, plain_str)
+                    buf = bytearray()
             except Exception:
                 pass
 

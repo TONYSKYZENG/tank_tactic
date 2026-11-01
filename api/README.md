@@ -1,20 +1,22 @@
 # 🌐 Tanks Tactic Network API Specification
 
-The Tanks Tactic Game Engine provides an external, programmable remote control and telemetry interface based on a lightweight, plain-text **JSON-RPC** protocol.
+The Tanks Tactic Game Engine provides an external, programmable remote control and telemetry interface supporting **dual wire formats**:
+1. **Standard JSON-RPC** (`{"action": "api.move", "unit_ids": "player_alpha", "x": 250, "y": 380}`)
+2. **Plain Function-Call Format** (`func(arg1, arg2, ...)` or `api.func(arg1, arg2, ...)`, e.g. `move([player_alpha, player_bravo], 250, 380)`)
 
-It enables external agents, reinforcement learning controllers, automated test harnesses, and third-party dashboards to monitor, pause, resume, dispatch tactical commands, and inspect friendly armor units in real-time.
+It enables external agents, LLM/VLM controllers, reinforcement learning controllers, automated test harnesses, and third-party dashboards to monitor, pause, resume, dispatch tactical commands, and inspect friendly armor units in real-time.
 
 ---
 
 ## 📡 Transport Protocols & Port Matrix
 
-By default, the engine starts three network servers simultaneously:
+By default, the engine starts three network servers simultaneously (all three transparently accept both **JSON** and **Plain `func(arg1, arg2, ...)`** requests):
 
 | Protocol | Default Port | Format & Wire Encoding | Description |
 | :--- | :--- | :--- | :--- |
-| **WebSocket** | `8090` | RFC 6455 Text Frames (JSON) | Bi-directional, event-driven web socket stream. |
-| **Raw TCP/IP** | `8091` | Newline-delimited (`\n`) JSON | Raw socket stream for any language or CLI tools (`nc`, `telnet`). |
-| **UDP Beacon & RPC** | `8092` | UDP Datagrams (UTF-8 JSON) | Online broadcast discovery ("我在这里") and connectionless RPC. |
+| **WebSocket** | `8090` | RFC 6455 Text Frames (JSON or `func(...)`) | Bi-directional, event-driven web socket stream. |
+| **Raw TCP/IP** | `8091` | Newline-delimited (`\n`) JSON or `func(...)` | Raw socket stream for any language or CLI tools (`nc`, `telnet`). |
+| **UDP Beacon & RPC** | `8092` | UDP Datagrams (UTF-8 JSON or `func(...)`) | Online broadcast discovery ("我在这里") and connectionless RPC. |
 
 *All ports and host bindings can be customized using command-line arguments (e.g. `--api-host`, `--api-ws-port`, `--api-tcp-port`, `--api-udp-port`).*
 
@@ -42,9 +44,10 @@ The beacon continues to broadcast every 5 seconds. Clients can also send a datag
 
 ## 📐 Wire Protocol & Request Structure
 
-Every request must be a valid JSON object. Both root-level attributes and nested `params` structures are accepted.
+The engine natively supports **two request formats** over WebSocket, TCP, UDP, and direct `GameAPIController.handle_request()` calls:
 
-### Standard Request Envelope:
+### Format A: Standard JSON Envelope
+Every JSON request is a JSON object (or array of objects for batch execution). Both root-level attributes and nested `params` structures are accepted:
 ```json
 {
   "action": "api.report",
@@ -54,7 +57,27 @@ Every request must be a valid JSON object. Both root-level attributes and nested
 ```
 *Note: The `"api."` prefix is optional. `"action": "report"` and `"action": "api.report"` are equivalent.*
 
-### Standard Response Envelope:
+### Format B: Plain Function-Call Format (`func(arg1, arg2, ...)`)
+For concise human CLI usage, LLM tool calls, or lightweight scripts, you can send raw plain-text function calls directly without wrapping them in JSON:
+```text
+func(arg1, arg2, ...)
+api.func(arg1, arg2, ...)
+```
+#### Plain Format Parsing & Paired Delimiter Rules ("掐头去尾"):
+1. **Paired Quotes & Brackets as Single String Arguments**:
+   - Whenever an argument is enclosed in paired double quotes `"..."`, single quotes `'...'`, Chinese curly quotes `“...”` / `‘...’`, or square brackets `[...]` / `【...】`, **everything inside the pair (including commas and spaces) is treated as a single long string argument**, and the opening and closing delimiters are **automatically stripped ("掐头去尾")**.
+   - Examples:
+     - `move([player_alpha, player_bravo], 250, 380)` $\rightarrow$ `unit_ids="player_alpha, player_bravo"`, `x=250.0`, `y=380.0`
+     - `move("player_alpha, player_bravo", 250, 380)` $\rightarrow$ `unit_ids="player_alpha, player_bravo"`, `x=250.0`, `y=380.0`
+     - `set_tactic(“player_alpha, player_bravo”, ‘defensive’)` $\rightarrow$ `unit_ids="player_alpha, player_bravo"`, `tactic="defensive"`
+     - `report('player_alpha')` $\rightarrow$ `unit_id="player_alpha"`
+2. **Positional & Keyword Arguments (`key=value`)**:
+   - Arguments can be passed positionally according to the endpoint signature, or explicitly via `key=value` (e.g. `list_enemy_curr(god_mode=true)`, `move([player_alpha], x=250, y=380, seq=5)`).
+   - Numbers (`int` / `float`) and booleans (`true` / `false`) outside quotes are automatically cast to their native types.
+3. **Multi-Command Batching**:
+   - Multiple plain calls can be separated by `;` or newlines in a single payload (e.g. `pause(); move([player_alpha], 250, 380); resume()`), or mixed inside a JSON batch array `["pause()", "move([player_alpha], 250, 380)"]`.
+
+### Standard Response Envelope (Always JSON):
 ```json
 {
   "status": "ok",
@@ -110,7 +133,10 @@ Freezes or unfreezes the game engine's physical simulation, projectile updates, 
 - **Default State on Startup**: The game starts in **PAUSED** mode by default to allow initial tactical planning and reconnaissance. Use `api.resume` or press the **P** key in the GUI/WebUI to start the simulation.
 - **Pre-Execution Queuing**: Tactical movement, targeting, and firing APIs (`command_move`, `command_attack`, `command_fire`, etc.) can be called during pause. They will be acknowledged and queued, executing immediately as soon as the engine is resumed.
 
-#### Request (Pause):
+#### Request (Pause — Plain or JSON):
+```text
+pause()
+```
 ```json
 {"action": "api.pause"}
 ```
@@ -123,7 +149,10 @@ Freezes or unfreezes the game engine's physical simulation, projectile updates, 
 }
 ```
 
-#### Request (Resume):
+#### Request (Resume — Plain or JSON):
+```text
+resume()
+```
 ```json
 {"action": "api.resume"}
 ```
@@ -142,7 +171,10 @@ Freezes or unfreezes the game engine's physical simulation, projectile updates, 
 
 Evaluates whether the victory condition configured in the active mission (`missions/*.json`) has been satisfied.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+is_success()
+```
 ```json
 {"action": "api.is_success"}
 ```
@@ -163,7 +195,10 @@ Evaluates whether the victory condition configured in the active mission (`missi
 
 Gracefully shuts down the game engine, closes all network listeners, stops background loops, and exits the application process.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+terminate()
+```
 ```json
 {"action": "api.terminate"}
 ```
@@ -181,7 +216,10 @@ Gracefully shuts down the game engine, closes all network listeners, stops backg
 
 Resets the battle, reinitializes entity positions, reloads maps/mission configurations, and restarts the game simulation loop.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+restart()
+```
 ```json
 {"action": "api.restart"}
 ```
@@ -202,7 +240,10 @@ Retrieves a **comma-separated string** of IDs for all currently surviving friend
 > [!IMPORTANT]
 > **Probabilistic Visibility Filter**: Friendly units also participate in the visibility mechanism. If a unit's `visibility` attribute is less than `1.0` (e.g. `0.7`), there is a probabilistic chance (`1 - visibility`) that the unit will not be detected or reported in that query tick. Units with `visibility: 1.0` are guaranteed to be listed as long as they are alive.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+list_current_unit_id()
+```
 ```json
 {"action": "api.list_current_unit_id"}
 ```
@@ -227,7 +268,10 @@ Lists currently active enemy tank IDs (comma-separated). Supports two operationa
    - Aggregates the field of view (square sight viewports) of all surviving friendly units.
    - For every enemy within line-of-sight, checks the enemy's `visibility` attribute (0.0 ~ 1.0) probabilistically. Only enemies that pass the roll are included in the returned list. Enemies outside friendly vision are never returned.
 
-#### Request (Default Vision Mode):
+#### Request (Default Vision Mode — Plain or JSON):
+```text
+list_enemy_curr()
+```
 ```json
 {
   "action": "api.list_enemy_curr",
@@ -245,7 +289,10 @@ Lists currently active enemy tank IDs (comma-separated). Supports two operationa
 }
 ```
 
-#### Request (God Mode):
+#### Request (God Mode — Plain or JSON):
+```text
+list_enemy_curr(true)
+```
 ```json
 {
   "action": "api.list_enemy_curr",
@@ -276,7 +323,10 @@ Accesses the **Global Enemy Memory** registry.
 > - **Lost Tracking**: When the enemy slips away into fog-of-war or escapes line-of-sight, `is_tracking` switches to `false`. Its **last known coordinates** remain frozen in memory. In GUI / headless stream, lost enemies are rendered as a **dashed bounding box** marking their last confirmed location.
 > - **Witnessed Death Deletion Rule**: An enemy is removed from the memory registry **ONLY IF** friendly units witness its destruction (i.e. it is visible to friendly forces at the exact moment of its elimination). Enemies destroyed unseen in fog remain in memory until scouted.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+list_enemy_mem()
+```
 ```json
 {"action": "api.list_enemy_mem"}
 ```
@@ -302,7 +352,10 @@ Retrieves intelligence regarding a specific enemy unit stored in the memory regi
 > **Strict Operational Security**:
 > Enemy internal combat statistics—such as **HP, max HP, movement speed, fire cooldown, and ammunition—are strictly classified and NEVER revealed**. Only the last known coordinates, unit type, and tracking state are reported.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+report_enemy("e_hunter_1")
+```
 ```json
 {
   "action": "api.report_enemy",
@@ -329,10 +382,14 @@ Retrieves intelligence regarding a specific enemy unit stored in the memory regi
 
 ### 9. Tactical Command APIs
 
-Batch operations target units identified by `unit_ids` (either a comma-separated string `"id1,id2"` or a JSON array `["id1", "id2"]`).
+Batch operations target units identified by `unit_ids` (a comma-separated string `"id1,id2"`, a JSON array `["id1", "id2"]`, or a paired-delimiter string in Plain format such as `[id1, id2]` / `"id1, id2"` / `'id1, id2'` / `“id1, id2”`).
 
-#### 9.1 `api.command_move`
-Directs targeted units to navigate to destination coordinates `(x, y)` in formation.
+#### 9.1 `api.command_move` (or `move`)
+Directs targeted units to navigate to destination coordinates `(x, y)` in formation along direct any-angle diagonal paths.
+```text
+move([player_alpha, player_bravo], 250.0, 380.0)
+move("player_alpha, player_bravo", 250.0, 380.0)
+```
 ```json
 {
   "action": "api.command_move",
@@ -352,8 +409,12 @@ Directs targeted units to navigate to destination coordinates `(x, y)` in format
 }
 ```
 
-#### 9.2 `api.command_attack`
-Orders targeted units to focus fire on a specific enemy tank or location.
+#### 9.2 `api.command_attack` (or `attack`)
+Orders targeted units to focus fire on a specific enemy tank or location `(x, y)`.
+```text
+attack([player_alpha], "e_hunter_1")
+attack('player_alpha, player_bravo', 320, 240)
+```
 ```json
 {
   "action": "api.command_attack",
@@ -372,13 +433,17 @@ Orders targeted units to focus fire on a specific enemy tank or location.
 }
 ```
 
-#### 9.3 `api.command_set_tactic`
+#### 9.3 `api.command_set_tactic` (or `set_tactic` / `tactic`)
 Updates the combat posture of targeted units. Supported postures:
 - `"aggressive"` / `"1"`: Engage enemies on sight.
 - `"defensive"` / `"2"`: Hold position, defend localized perimeter.
 - `"guard_unit"` / `"3"`: Escort and protect a specified friendly unit/fortress.
 - `"manual"` / `"stop"`: Idle / direct manual micro-control.
 
+```text
+set_tactic([player_alpha], 'defensive')
+tactic(“player_alpha, player_bravo”, ‘aggressive’)
+```
 ```json
 {
   "action": "api.command_set_tactic",
@@ -397,8 +462,11 @@ Updates the combat posture of targeted units. Supported postures:
 }
 ```
 
-#### 9.4 `api.command_set_guard`
+#### 9.4 `api.command_set_guard` (or `set_guard` / `guard`)
 Assigns targeted units to closely escort and protect a specific friendly unit (e.g., the Supply Fortress).
+```text
+guard([player_alpha, player_bravo], "core_supply_base")
+```
 ```json
 {
   "action": "api.command_set_guard",
@@ -423,7 +491,10 @@ Assigns targeted units to closely escort and protect a specific friendly unit (e
 
 Requests a complete telemetry and status report for a specific friendly unit.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+report("player_alpha")
+```
 ```json
 {
   "action": "api.report",
@@ -462,11 +533,14 @@ Requests a complete telemetry and status report for a specific friendly unit.
 
 ---
 
-### 11. `api.find_path`
+### 11. `api.find_path` (or `path`)
 
-Plans an optimal A* path from the unit's current position to target coordinates `(x, y)`. Automatically calculates path length, waypoint nodes, and ammo breach costs based on limited/unlimited ammo rules.
+Plans an optimal 8-directional A* + Any-Angle String-Pulled path from the unit's current position to target coordinates `(x, y)`. Automatically calculates waypoint nodes and ammo breach costs based on limited/unlimited ammo rules.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+find_path("player_alpha", 480.0, 320.0)
+```
 ```json
 {
   "action": "api.find_path",
@@ -484,7 +558,7 @@ Plans an optimal A* path from the unit's current position to target coordinates 
   "start": [224.0, 448.0],
   "goal": [480.0, 320.0],
   "reachable": true,
-  "nodes_count": 12,
+  "nodes_count": 3,
   "ammo_cost": 2,
   "nodes": [[224.0, 448.0], [256.0, 416.0], [480.0, 320.0]]
 }
@@ -492,11 +566,14 @@ Plans an optimal A* path from the unit's current position to target coordinates 
 
 ---
 
-### 12. `api.get_resources`
+### 12. `api.get_resources` (or `resources`)
 
 Queries tactical resource stockpiles (e.g. `dark_matter`, `alloy`) and current real-time harvesting income rates for a given camp.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+get_resources("player")
+```
 ```json
 {
   "action": "api.get_resources",
@@ -522,11 +599,14 @@ Queries tactical resource stockpiles (e.g. `dark_matter`, `alloy`) and current r
 
 ---
 
-### 13. `api.list_resource_blocks`
+### 13. `api.list_resource_blocks` (or `blocks`)
 
 Lists all active natural resource blocks on the map with their tile coordinates, current amount, regeneration speed, harvesting radius, and exclusive occupation radius.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+list_resource_blocks("player_alpha")
+```
 ```json
 {
   "action": "api.list_resource_blocks",
@@ -564,7 +644,10 @@ Lists all active natural resource blocks on the map with their tile coordinates,
 
 Orders units to begin extracting tactical resources from a designated map tile `(col, row)`, or stops harvesting.
 
-#### Request (Start Harvest):
+#### Request (Start Harvest — Plain or JSON):
+```text
+harvest([player_alpha], 8, 12)
+```
 ```json
 {
   "action": "api.harvest",
@@ -574,7 +657,10 @@ Orders units to begin extracting tactical resources from a designated map tile `
 }
 ```
 
-#### Request (Stop Harvest):
+#### Request (Stop Harvest — Plain or JSON):
+```text
+stop_harvest([player_alpha])
+```
 ```json
 {
   "action": "api.stop_harvest",
@@ -588,7 +674,10 @@ Orders units to begin extracting tactical resources from a designated map tile `
 
 Enumerates all registered converter recipes loaded into the global registry (`converter/` directory), returning recipe IDs and brief metadata.
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+list_converter()
+```
 ```json
 {
   "action": "api.list_converter"
@@ -636,7 +725,10 @@ Enumerates all registered converter recipes loaded into the global registry (`co
 
 Fetches detailed parameters of a specific converter recipe by its ID. Supports querying zero-input recipes (free resource generation) and tank-production recipes (containing chassis template, visibility, vision size, and ammo).
 
-#### Request:
+#### Request (Plain or JSON):
+```text
+show_converter("recipe_build_tank")
+```
 ```json
 {
   "action": "api.show_converter",
@@ -672,7 +764,10 @@ Fetches detailed parameters of a specific converter recipe by its ID. Supports q
 
 Enqueues and starts a conversion or unit production task on an equipped armor unit. While converting, the unit is held stationary and cannot move or fire. When a tank is produced, it automatically receives an ID of `{producer_id}/{sequence}`, is placed on adjacent free terrain, and is registered to the global battle state.
 
-#### Request (Start Conversion / Production):
+#### Request (Start Conversion / Production — Plain or JSON):
+```text
+convert("player_alpha", 'recipe_build_tank', 2)
+```
 ```json
 {
   "action": "api.convert",
@@ -694,7 +789,10 @@ Enqueues and starts a conversion or unit production task on an equipped armor un
 }
 ```
 
-#### Request (Terminate Conversion):
+#### Request (Terminate Conversion — Plain or JSON):
+```text
+terminate_convert("player_alpha")
+```
 ```json
 {
   "action": "api.terminate_convert",
@@ -706,60 +804,77 @@ Enqueues and starts a conversion or unit production task on an equipped armor un
 
 ## 💻 Interactive Console CLI (`tests/cli_client.py`)
 
-A built-in interactive console client is provided for quick terminal debugging and manual interaction.
+A built-in interactive console client is provided for quick terminal debugging and manual interaction. It supports both space-separated CLI shortcuts and direct **`func(arg1, arg2, ...)`** plain API calls.
 
 ```bash
 # Launch interactive REPL
 python3 tests/cli_client.py
 
-# Or execute a one-shot command
+# Execute one-shot CLI commands
 python3 tests/cli_client.py --cmd "list"
 python3 tests/cli_client.py --cmd "resources"
 python3 tests/cli_client.py --cmd "list_converter"
 python3 tests/cli_client.py --cmd "show_converter recipe_build_tank"
 python3 tests/cli_client.py --cmd "convert player_alpha recipe_build_tank 1"
 python3 tests/cli_client.py --cmd "harvest player_alpha 8 12"
+
+# Or execute raw Plain Function-Call syntax directly
+python3 tests/cli_client.py --cmd "move([player_alpha, player_bravo], 250, 380)"
+python3 tests/cli_client.py --cmd "set_tactic(“player_alpha, player_bravo”, ‘defensive’)"
+python3 tests/cli_client.py --cmd "report('player_alpha')"
 ```
 
 ### CLI Command Summary:
-| Command | Description |
+| Command / Plain Call | Description |
 | :--- | :--- |
-| `pause` | Pause engine simulation loop |
-| `resume` | Resume engine simulation loop |
-| `restart` | Reset battle & restart simulation |
-| `status` | Check victory & defeat status |
-| `list` | List surviving friendly unit IDs |
-| `list_enemy [god]` | List currently visible enemy IDs (or all if `god`) |
-| `list_enemy_mem` | List enemy IDs recorded in global memory (tracked & lost) |
-| `report <id>` | Query comprehensive telemetry of a friendly unit |
-| `report_enemy <id>` | Query last known coordinates & unit type of enemy in memory |
-| `move <ids> <x> <y>` | Dispatch batch movement orders |
-| `attack <ids> <enemy_id>` | Order batch focus fire |
-| `tactic <ids> <mode>` | Set combat tactic (`aggressive`, `defensive`, etc.) |
-| `guard <ids> <ally_id>` | Assign bodyguard escort orders |
-| `fire <ids> [direction]` | Order batch cannon fire |
-| `path <id> <x> <y>` | Plan optimal A* path & query ammo breach cost |
-| `resources [camp]` | Query resource reserves & real-time income rates |
-| `blocks [unit_id]` | Query active resource blocks and harvest ranges |
-| `harvest <ids> <c> <r>` | Order units to harvest resource block at tile `(col, row)` |
-| `stop_harvest [ids]` | Stop resource harvesting |
-| `list_converter` | List all registered converter recipe IDs |
-| `show_converter <id>` | Display detailed parameters of a converter recipe |
-| `convert <id> <r_id> [n]`| Enqueue recipe conversion or tank production |
-| `terminate_convert [id]`| Terminate active conversion and clear queue |
-| `terminate` | Terminate engine process |
-| `raw <json>` | Send custom arbitrary JSON payload |
+| `pause` / `pause()` | Pause engine simulation loop |
+| `resume` / `resume()` | Resume engine simulation loop |
+| `restart` / `restart()` | Reset battle & restart simulation |
+| `status` / `is_success()` | Check victory & defeat status |
+| `list` / `list_current_unit_id()` | List surviving friendly unit IDs |
+| `list_enemy [god]` / `list_enemy_curr(true)` | List currently visible enemy IDs (or all if `god`) |
+| `list_enemy_mem` / `list_enemy_mem()` | List enemy IDs recorded in global memory (tracked & lost) |
+| `report <id>` / `report("id")` | Query comprehensive telemetry of a friendly unit |
+| `report_enemy <id>` / `report_enemy("id")` | Query last known coordinates & unit type of enemy in memory |
+| `move <ids> <x> <y>` / `move([ids], x, y)` | Dispatch batch movement orders |
+| `attack <ids> <enemy_id>` / `attack([ids], "enemy_id")` | Order batch focus fire |
+| `tactic <ids> <mode>` / `set_tactic([ids], "mode")` | Set combat tactic (`aggressive`, `defensive`, etc.) |
+| `guard <ids> <ally_id>` / `guard([ids], "ally_id")` | Assign bodyguard escort orders |
+| `fire <ids> [direction]` / `fire([ids], "direction")` | Order batch cannon fire |
+| `path <id> <x> <y>` / `find_path("id", x, y)` | Plan optimal A* path & query ammo breach cost |
+| `resources [camp]` / `get_resources("camp")` | Query resource reserves & real-time income rates |
+| `blocks [unit_id]` / `list_resource_blocks("id")` | Query active resource blocks and harvest ranges |
+| `harvest <ids> <c> <r>` / `harvest([ids], c, r)` | Order units to harvest resource block at tile `(col, row)` |
+| `stop_harvest [ids]` / `stop_harvest([ids])` | Stop resource harvesting |
+| `list_converter` / `list_converter()` | List all registered converter recipe IDs |
+| `show_converter <id>` / `show_converter("id")` | Display detailed parameters of a converter recipe |
+| `convert <id> <r_id> [n]` / `convert("id", "r_id", n)` | Enqueue recipe conversion or tank production |
+| `terminate_convert [id]` / `terminate_convert("id")` | Terminate active conversion and clear queue |
+| `terminate` / `terminate()` | Terminate engine process |
+| `raw <json_or_plain>` | Send custom arbitrary JSON or `func(...)` payload |
 
 ---
 
-## 🧭 Intelligent A* Pathfinding & Ammo-Optimized Obstacle Breaching
+## 🧭 Any-Angle Diagonal A* Pathfinding, Dynamic Obstacle Avoidance & Ammo-Optimized Breaching
 
-The engine features a dual-mode A* pathfinding algorithm ([`GridPathfinder`](file:///Users/xianzhizeng/Documents/projects/tanks_tactic/command/pathfinder.py)):
-- **Infinite Ammo Mode (`tank.ammo < 0` or unlimited ammo enabled)**:
-  - **Auto-Breaching (自动破障)**: Incurs minimal obstacle breach penalty (`0.8`), actively blasting straight through destructible brick barriers instead of undertaking lengthy detours.
-- **Limited Ammo Mode (`tank.ammo >= 0` and limited ammo enabled)**:
-  - **Ammo-Optimized Route (最省弹药破障)**: Imposes a heavy ammo penalty (`100.0`), automatically discovering zero-ammo bypasses around obstacles; if a passage is completely sealed, it computes the mathematically optimal path that breaches the absolute minimum number of brick barriers.
-- **API Access**: Accessible via `api.find_path(x, y)` in `TankScriptAPI` or `api.find_path` over WebSocket/TCP/UDP.
+The engine features a hybrid **8-directional A* + Any-Angle String Pulling** pathfinder ([`GridPathfinder`](file:///Volumes/data/projects/tank_tactic/command/pathfinder.py)) combined with multi-stage **Context Steering Dynamic Obstacle Avoidance** ([`commands.py`](file:///Volumes/data/projects/tank_tactic/command/commands.py)):
+
+1. **Direct Diagonal & Any-Angle Pathfinding (任意角度斜线直达)**:
+   - **8-Direction A* + Octile Heuristic**: Explores all 8 compass directions (`N, S, E, W, NE, NW, SE, SW`) with strict diagonal corner-cutting prevention and oversized chassis clearance checks (`_is_oversized_blocked_at`).
+   - **Swept-Box Line-of-Sight String Pulling (`_smooth_path` & `is_segment_passable`)**: Automatically simplifies multi-step grid waypoints into direct Euclidean straight-line segments whenever the tank's swept bounding box is clear of obstacles—allowing tanks to travel directly along any diagonal angle instead of zig-zagging horizontally and vertically.
+   - **Full-Vector Physics Displacement**: [`PhysicsEngine.move_tank`](file:///Volumes/data/projects/tank_tactic/physics/engine.py) prioritizes full vector displacement `(vx, vy)` before applying corridor center-line alignment assist, ensuring shallow diagonal trajectories are never pulled back onto orthogonal grid lines.
+
+2. **Multi-Stage Dynamic Obstacle Avoidance (动态避障与防死锁)**:
+   - **Minkowski Obstacle Expansion (`_collect_avoid_tiles`)**: Stationary structures, harvesters, converting units, and blocking tanks are dynamically expanded by the moving tank's half-size during A* replanning so paths leave sufficient physical clearance.
+   - **Context Steering & Right-Hand Traffic Rule (`_steer_around_obstacle`)**: When another tank enters the proactive lookahead cone, the unit probes a multi-angle steering fan (`±25° ~ ±135°`) biased by a right-hand traffic rule and locks its evasion side (`evade_lock_timer`) to smoothly glide around stationary or oncoming tanks without oscillation or wall-sliding back into the obstacle's center line.
+   - **Dynamic Lookahead Shortcutting & Narrow-Corridor Yielding**: Continuously checks line-of-sight to downstream waypoints (`_is_corridor_blocked_by_tank`) to skip intermediate nodes smoothly, and performs side-pocket or reverse yielding when two tanks meet head-on in a single-tile corridor.
+
+3. **Dual-Mode Ammo-Optimized Obstacle Breaching**:
+   - **Infinite Ammo Mode (`tank.ammo < 0` or unlimited ammo enabled)**:
+     - **Auto-Breaching (自动破障)**: Incurs minimal obstacle breach penalty (`0.8`), actively blasting straight through destructible brick barriers instead of undertaking lengthy detours.
+   - **Limited Ammo Mode (`tank.ammo >= 0` and limited ammo enabled)**:
+     - **Ammo-Optimized Route (最省弹药破障)**: Imposes a heavy ammo penalty (`100.0`), automatically discovering zero-ammo bypasses around obstacles; if a passage is completely sealed, it computes the mathematically optimal path that breaches the absolute minimum number of brick barriers.
+   - **API Access**: Accessible via `api.find_path(x, y)` in `TankScriptAPI` or `find_path(unit_id, x, y)` / `{"action": "api.find_path", ...}` over WebSocket/TCP/UDP.
 
 ---
 
@@ -805,7 +920,7 @@ def run(api):
 
 ## 🛠️ Code Examples
 
-### Python (Raw TCP Socket)
+### Python (Raw TCP Socket — Plain `func(...)` or JSON)
 ```python
 import socket
 import json
@@ -813,24 +928,26 @@ import json
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect(("127.0.0.1", 8091))
 
-# Send newline-terminated JSON
-s.sendall(json.dumps({"action": "api.list_current_unit_id"}).encode() + b"\n")
+# Example 1: Send Plain Function-Call format (with paired brackets/quotes)
+s.sendall(b"move([player_alpha, player_bravo], 250, 380)\n")
+print("Move Response:", json.loads(s.recv(4096).decode()))
 
-# Receive newline-terminated JSON
+# Example 2: Send newline-terminated JSON
+s.sendall(json.dumps({"action": "api.list_current_unit_id"}).encode() + b"\n")
 response = json.loads(s.recv(4096).decode())
 print("Active Units:", response["unit_ids"])
 s.close()
 ```
 
-### Python (UDP Datagram RPC)
+### Python (UDP Datagram RPC — Plain `func(...)` or JSON)
 ```python
 import socket
 import json
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-req = json.dumps({"action": "api.report", "unit_id": "core_supply_base"}).encode()
-sock.sendto(req, ("127.0.0.1", 8092))
 
+# Plain Function-Call datagram
+sock.sendto(b"report('core_supply_base')", ("127.0.0.1", 8092))
 data, _ = sock.recvfrom(4096)
 print("Telemetry:", json.loads(data.decode()))
 sock.close()
@@ -838,5 +955,10 @@ sock.close()
 
 ### Bash (`nc` / Netcat)
 ```bash
+# Using Plain Function-Call format:
+echo 'is_success()' | nc 127.0.0.1 8091
+echo 'move([player_alpha, player_bravo], 250, 380)' | nc 127.0.0.1 8091
+
+# Or using JSON format:
 echo '{"action": "api.is_success"}' | nc 127.0.0.1 8091
 ```

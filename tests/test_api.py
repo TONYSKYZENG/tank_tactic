@@ -763,5 +763,80 @@ class TestGameAPI(unittest.TestCase):
         # 验证与目标中心的距离在极小误差范围 (<= 4.0 像素) 内
         self.assertLessEqual(dist_to_center, 4.0)
 
+    def test_plain_function_call_format_and_paired_delimiters(self):
+        """测试 func(arg1, arg2, ...) 原始 plain 格式解析，以及成对 " / ' / “” / ‘’ / [...] 长字符串合并与自动掐头去尾"""
+        from resource.models import ResourceBlock
+
+        # 1. 验证成对定界符 (" / ' / “” / ‘’ / [...]) 内部带逗号长字符串参数提取与自动掐头去尾
+        pos1, _ = GameAPIController.extract_plain_args('"player_alpha, player_bravo", 250, 350')
+        self.assertEqual(pos1, ["player_alpha, player_bravo", "250", "350"])
+
+        pos2, _ = GameAPIController.extract_plain_args("'player_alpha, player_bravo', 250, 350")
+        self.assertEqual(pos2, ["player_alpha, player_bravo", "250", "350"])
+
+        pos3, _ = GameAPIController.extract_plain_args("[player_alpha, player_bravo], 250, 350")
+        self.assertEqual(pos3, ["player_alpha, player_bravo", "250", "350"])
+
+        pos4, _ = GameAPIController.extract_plain_args("“player_alpha, player_bravo”, ‘defensive’")
+        self.assertEqual(pos4, ["player_alpha, player_bravo", "defensive"])
+
+        # 2. 验证无参 plain 调用: pause() / resume() / api.is_success()
+        resp_pause = json.loads(self.controller.handle_request("api.pause()"))
+        self.assertEqual(resp_pause["status"], "ok")
+        self.assertTrue(self.mock_game.is_paused)
+
+        resp_resume = json.loads(self.controller.handle_request("resume()"))
+        self.assertEqual(resp_resume["status"], "ok")
+        self.assertFalse(self.mock_game.is_paused)
+
+        resp_succ = json.loads(self.controller.handle_request("is_success()"))
+        self.assertEqual(resp_succ["status"], "ok")
+        self.assertFalse(resp_succ["is_success"])
+
+        # 3. 验证带方括号 [...] 长字符串参数的 move([player_alpha, player_bravo], 260, 360)
+        resp_move1 = json.loads(self.controller.handle_request("move([player_alpha, player_bravo], 260, 360)"))
+        self.assertEqual(resp_move1["status"], "ok")
+        self.assertIn("player_alpha", resp_move1["affected_units"])
+        self.assertIn("player_bravo", resp_move1["affected_units"])
+        self.assertEqual(resp_move1["destination"], {"x": 260.0, "y": 360.0})
+
+        # 4. 验证带双引号/单引号/中文引号长字符串参数的调用
+        resp_move2 = json.loads(self.controller.handle_request('api.command_move("player_alpha, player_bravo", 180, 220)'))
+        self.assertEqual(resp_move2["status"], "ok")
+        self.assertEqual(len(resp_move2["affected_units"]), 2)
+
+        resp_tactic = json.loads(self.controller.handle_request("set_tactic(‘player_alpha, player_bravo’, “defensive”)"))
+        self.assertEqual(resp_tactic["status"], "ok")
+        self.assertEqual(resp_tactic["tactic"], "defensive")
+        self.assertEqual(self.mock_game.command_dispatcher.get_tactic(self.mock_game.p1), TacticMode.DEFENSIVE)
+
+        # 5. 验证 report / attack / guard / harvest 的 plain 格式调用
+        resp_rep = json.loads(self.controller.handle_request("report('player_alpha')"))
+        self.assertEqual(resp_rep["status"], "ok")
+        self.assertEqual(resp_rep["report"]["id"], "player_alpha")
+
+        resp_atk = json.loads(self.controller.handle_request('attack([player_alpha], "enemy_boss")'))
+        self.assertEqual(resp_atk["status"], "ok")
+        self.assertEqual(resp_atk["target_id"], "enemy_boss")
+
+        blk = ResourceBlock(col=6, row=7, resource_type="alloy", current_amount=300.0, initial_amount=300.0, regen_rate=1.0)
+        self.mock_game.resource_manager.blocks.append(blk)
+        self.mock_game.resource_manager._block_by_pos[(6, 7)] = blk
+
+        resp_harv = json.loads(self.controller.handle_request("harvest([player_alpha], 6, 7)"))
+        self.assertEqual(resp_harv["status"], "ok")
+        self.assertEqual(resp_harv["harvest_target"], [6, 7])
+
+        # 6. 验证 CLI 客户端直接输入 func(arg1, arg2, ...) plain 格式
+        from tests.cli_client import TanksConsoleClient
+        client = TanksConsoleClient()
+        sent = []
+        client.send_request = lambda p: sent.append(p) or {"status": "ok"}
+        client._print_response = lambda r: None
+        client.execute_command_line('move([player_alpha, player_bravo], 300, 400)')
+        self.assertEqual(sent[-1]["unit_ids"], "player_alpha, player_bravo")
+        self.assertEqual(sent[-1]["x"], 300.0)
+        self.assertEqual(sent[-1]["y"], 400.0)
+
 if __name__ == "__main__":
     unittest.main()

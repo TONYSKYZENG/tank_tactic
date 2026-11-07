@@ -4,7 +4,7 @@ from physics.entities import Tank, Direction, Camp
 from map_loader.models import GameMap, TileType
 from grouping.formation import calculate_formation_slots
 from .tactics_mode import TacticMode
-from .commands import BaseCommand, MoveCommand, AttackTargetCommand, HoldCommand, GuardUnitCommand, HarvestCommand
+from .commands import BaseCommand, MoveCommand, AttackTargetCommand, HoldCommand, GuardUnitCommand, HarvestCommand, AttackGroundCommand
 
 class CommandDispatcher:
     """
@@ -71,6 +71,19 @@ class CommandDispatcher:
         for tank in valid_tanks:
             clear_path = self.is_auto_clear_path(tank)
             self.tank_commands[tank.id] = HarvestCommand(target_col, target_row, resource_manager, auto_clear_path=clear_path)
+
+    def issue_attack_ground(self, tanks: List[Tank], target_x: float, target_y: float) -> List[Tank]:
+        """为具备范围伤害属性 (splash_radius > 0) 的坦克下达强制攻击地块指令"""
+        valid_tanks = [t for t in tanks if t.alive and getattr(t, "splash_radius", 0.0) > 0]
+        if not valid_tanks:
+            return []
+
+        for tank in valid_tanks:
+            if getattr(tank, "is_harvesting", False):
+                tank.stop_harvest()
+            clear_path = self.is_auto_clear_path(tank)
+            self.tank_commands[tank.id] = AttackGroundCommand(target_x, target_y, auto_clear_path=clear_path)
+        return valid_tanks
 
     def issue_attack_target(self, tanks: List[Tank], target_tank: Tank, physics_engine=None, ignore_vision: bool = False):
         if not target_tank.alive:

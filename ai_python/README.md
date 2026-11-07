@@ -149,6 +149,9 @@ All methods below are available via the `api` parameter passed into `run(api)`.
 | :--- | :--- |
 | `api.move(x, y, unit_ids=None)` | Commands host (or squad `unit_ids`) to pathfind to `(x, y)`. |
 | `api.attack(target_id, unit_ids=None)` | Commands units to focus-fire on `target_id`. |
+| `api.attack_ground(x, y, unit_ids=None)` | Commands AoE units (`splash_radius > 0`) to bombard ground position `(x, y)`. |
+| `api.force_attack_ground(x, y, unit_ids=None)` | Alias for `attack_ground(x, y)`. |
+| `api.attack_tile(col, row, unit_ids=None)` | Commands AoE units to bombard grid tile cell `(col, row)`. |
 | `api.fire(direction=None, unit_ids=None)` | Orders cannon fire in a cardinal direction or current facing. |
 | `api.set_tactic(tactic, guard_target_id=None, unit_ids=None)` | Sets squad tactic (`"patrol"`, `"aggressive"`, `"defensive"`, `"hunter"`, `"stop"`). |
 | `api.set_guard(target_id, unit_ids=None)` | Sets bodyguard escort orders protecting `target_id`. |

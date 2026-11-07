@@ -122,6 +122,28 @@ class TestEditorComponents(unittest.TestCase):
         mission_widget._on_prop_changed()
         self.assertFalse(player_unit.controllable)
 
+        # Test editing arbitrary & combat attributes in editor inspector
+        mission_widget.spin_health.setValue(35)
+        mission_widget.spin_speed.setValue(4.2)
+        mission_widget.spin_attack_range.setValue(320.0)
+        mission_widget.spin_accuracy.setValue(0.92)
+        mission_widget.spin_dodge.setValue(0.35)
+        mission_widget.spin_splash_radius.setValue(45.0)
+        mission_widget.combo_friendly_fire.setCurrentIndex(1) # index 1 is '1' (Enabled)
+        mission_widget.edit_extra_json.setPlainText('{"laser_power": 99, "shield_type": "ion"}')
+        mission_widget._on_custom_json_changed()
+        mission_widget._on_prop_changed()
+
+        self.assertEqual(player_unit.extra_attrs.get("health"), 35)
+        self.assertEqual(player_unit.extra_attrs.get("speed"), 4.2)
+        self.assertEqual(player_unit.extra_attrs.get("attack_range"), 320.0)
+        self.assertEqual(player_unit.extra_attrs.get("accuracy"), 0.92)
+        self.assertEqual(player_unit.extra_attrs.get("dodge"), 0.35)
+        self.assertEqual(player_unit.extra_attrs.get("splash_radius"), 45.0)
+        self.assertEqual(player_unit.extra_attrs.get("friendly_fire"), 1)
+        self.assertEqual(player_unit.extra_attrs.get("laser_power"), 99)
+        self.assertEqual(player_unit.extra_attrs.get("shield_type"), "ion")
+
         # Edit mission briefing
         self.assertIsNotNone(mission_widget.edit_mission_briefing)
         mission_widget.edit_mission_briefing.setPlainText("测试战役简报：固守待援，摧毁所有敌方坦克。")
@@ -133,6 +155,15 @@ class TestEditorComponents(unittest.TestCase):
         self.assertEqual(len(data["player_units"]), 1)
         self.assertEqual(data["player_units"][0]["id"], "player_alpha")
         self.assertFalse(data["player_units"][0]["controllable"])
+        self.assertEqual(data["player_units"][0]["health"], 35)
+        self.assertEqual(data["player_units"][0]["speed"], 4.2)
+        self.assertEqual(data["player_units"][0]["attack_range"], 320.0)
+        self.assertEqual(data["player_units"][0]["accuracy"], 0.92)
+        self.assertEqual(data["player_units"][0]["dodge"], 0.35)
+        self.assertEqual(data["player_units"][0]["splash_radius"], 45.0)
+        self.assertEqual(data["player_units"][0]["friendly_fire"], 1)
+        self.assertEqual(data["player_units"][0]["laser_power"], 99)
+        self.assertEqual(data["player_units"][0]["shield_type"], "ion")
 
         # Test creating new mission
         new_m = mission_widget.create_new_mission(map_file="maps/custom.json", mission_name="Brand New Mission")

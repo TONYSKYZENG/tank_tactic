@@ -17,6 +17,15 @@ class PlayerMissionInfo:
     controllable: bool = True   # 是否允许玩家手动框选或微操控制
     ai_script: Optional[str] = None  # 独立线程战术 Python 脚本路径
     converter_table: Optional[List[str]] = None  # 转换配方列表
+    extra_attrs: Dict[str, Any] = field(default_factory=dict)  # 任意模板属性覆盖 (health, speed, accuracy, dodge 等)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if hasattr(self, key) and key != "extra_attrs":
+            return getattr(self, key)
+        return self.extra_attrs.get(key, default)
+
+    def __getitem__(self, item: str) -> Any:
+        return self.get(item)
 
 @dataclass
 class EnemyMissionInfo:
@@ -30,6 +39,15 @@ class EnemyMissionInfo:
     controllable: bool = False  # 敌军默认不可由玩家操控
     ai_script: Optional[str] = None  # 独立线程战术 Python 脚本路径
     converter_table: Optional[List[str]] = None  # 转换配方列表
+    extra_attrs: Dict[str, Any] = field(default_factory=dict)  # 任意模板属性覆盖 (health, speed, accuracy, dodge 等)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if hasattr(self, key) and key != "extra_attrs":
+            return getattr(self, key)
+        return self.extra_attrs.get(key, default)
+
+    def __getitem__(self, item: str) -> Any:
+        return self.get(item)
 
 @dataclass
 class Mission:

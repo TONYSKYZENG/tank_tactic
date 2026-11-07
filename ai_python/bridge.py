@@ -14,10 +14,10 @@ class TankScriptAPI:
     具备全知全能特性（god_mode=True），无视战争迷雾与视线遮挡。
     """
 
-    def __init__(self, tank_id: str, api_controller, stop_event: threading.Event, script_manager=None):
+    def __init__(self, tank_id: str, api_controller, stop_event: Optional[threading.Event] = None, script_manager=None):
         self.tank_id = tank_id
         self.api_controller = api_controller
-        self.stop_event = stop_event
+        self.stop_event = stop_event if stop_event is not None else threading.Event()
         self.script_manager = script_manager
 
     def is_engine_paused(self) -> bool:
@@ -143,6 +143,34 @@ class TankScriptAPI:
         if isinstance(uids, str):
             uids = [uids]
         return self._call("command_attack", unit_ids=uids, target_id=target_id, god_mode=True)
+
+    def attack_ground(self, x: float, y: float, unit_ids: Optional[Any] = None) -> Dict[str, Any]:
+        """
+        对具备范围伤害能力 (splash_radius > 0) 的战车下达强制攻击地块指令 (Force Attack Ground):
+        :param x: 目标 X 像素坐标
+        :param y: 目标 Y 像素坐标
+        :param unit_ids: 执行攻击的单位 ID 或列表（缺省为本车 self.tank_id）
+        """
+        uids = unit_ids if unit_ids is not None else [self.tank_id]
+        if isinstance(uids, str):
+            uids = [uids]
+        return self._call("command_attack_ground", unit_ids=uids, x=x, y=y)
+
+    def force_attack_ground(self, x: float, y: float, unit_ids: Optional[Any] = None) -> Dict[str, Any]:
+        """强制攻击地块 (别名)"""
+        return self.attack_ground(x=x, y=y, unit_ids=unit_ids)
+
+    def attack_tile(self, col: int, row: int, unit_ids: Optional[Any] = None) -> Dict[str, Any]:
+        """
+        对具备范围伤害能力 (splash_radius > 0) 的战车下达强制攻击网格瓦片地块指令:
+        :param col: 地图瓦片列号 (0-based)
+        :param row: 地图瓦片行号 (0-based)
+        :param unit_ids: 执行攻击的单位 ID 或列表（缺省为本车 self.tank_id）
+        """
+        uids = unit_ids if unit_ids is not None else [self.tank_id]
+        if isinstance(uids, str):
+            uids = [uids]
+        return self._call("command_attack_ground", unit_ids=uids, col=col, row=row)
 
     def fire(self, direction: Optional[str] = None, unit_ids: Optional[Any] = None) -> Dict[str, Any]:
         """

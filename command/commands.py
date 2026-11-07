@@ -471,59 +471,17 @@ class AttackTargetCommand(BaseCommand):
         b_size = cfg.bullet_size if cfg else 12
         b_color = cfg.bullet_color if cfg else ("#E69C24" if tank.camp == Camp.PLAYER else "#E63946")
 
-        # 1. 自由 360° 全向瞄准视线与直接射击
+        attack_range = float(getattr(tank, "attack_range", getattr(cfg, "attack_range", 240.0) if cfg else 240.0))
+        if attack_range <= 0:
+            attack_range = 240.0
+
         los_clear = self.is_line_of_sight_clear(center_x, center_y, target_center_x, target_center_y, game_map)
-        if los_clear:
-            tank.angle = target_angle
-            self.stuck_attack_frames = 0
-            if tank.can_fire(physics_engine.limited_ammo_enabled):
-                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=target_angle)
-        else:
-            is_infinite = (tank.ammo < 0 or not physics_engine.limited_ammo_enabled)
-            if is_infinite and (is_aligned_v or is_aligned_h):
-                tank.angle = target_angle
-                if tank.can_fire(physics_engine.limited_ammo_enabled):
-                    self.stuck_attack_frames = 0
-                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=target_angle)
-                    return False
+        in_range = (dist <= attack_range)
 
-        # 2. 机会射击 (Opportunistic Fire)：360° 检查视野内是否有其他可直接开火的敌军
-        opp_tanks = physics_engine.enemy_tanks if tank.camp == Camp.PLAYER else physics_engine.player_tanks
-        if tank.camp == Camp.PLAYER and getattr(tank, "ai_script", None) is None:
-            cands = physics_engine.get_visible_enemies()
-        else:
-            cands = [t for t in opp_tanks if t.alive]
-
-        for cand in cands:
-            if cand == self.target_tank or not cand.alive:
-                continue
-            cand_cx = cand.x + cand.size / 2.0
-            cand_cy = cand.y + cand.size / 2.0
-            c_dx = cand_cx - center_x
-            c_dy = cand_cy - center_y
-            c_dist = math.hypot(c_dx, c_dy)
-            if c_dist < 260.0 and self.is_line_of_sight_clear(center_x, center_y, cand_cx, cand_cy, game_map):
-                c_angle = (math.degrees(math.atan2(c_dx, -c_dy))) % 360.0
-                tank.angle = c_angle
-                if tank.can_fire(physics_engine.limited_ammo_enabled):
-                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=c_angle)
-                break
-
-        # 如果自身是固定防御塔，不执行位移
-        if tank.is_tower or tank.speed <= 0:
-            tank.angle = target_angle
-            if tank.can_fire(physics_engine.limited_ammo_enabled):
-                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=target_angle)
-            return False
-
-        # 4. 寻找进攻占位阵位 (Standoff Attack Position，支持八方向环绕包抄)
+        # 寻找进攻占位阵位 (Standoff Attack Position，支持八方向环绕包抄)
         tx, ty = self.target_tank.x, self.target_tank.y
         dist_moved = math.hypot(self.last_target_pos[0] - tx, self.last_target_pos[1] - ty)
 
-        # 检查是否需要重新挑选阵位：
-        # - move_subcmd 为空
-        # - 目标移动超过半格
-        # - 当前机动子命令严重卡顿 (stuck_frames > 12)
         should_replan_standoff = (
             self.move_subcmd is None or
             dist_moved > 18.0 or
@@ -557,10 +515,8 @@ class AttackTargetCommand(BaseCommand):
                         cand_px = sc * tile_size
                         cand_py = sr * tile_size
                         d = math.hypot(cand_px - tank.x, cand_py - tank.y) / float(tile_size)
-                        # 正交阵位在隔墙破障射击时具备天然优势，赋予轻微优先权
                         if sc != c_target and sr != r_target:
                             d += 0.35
-                        # 若已有友军占据该阵位，增加权重促使坦克选择包抄另一侧
                         for other in allied_tanks:
                             if other.alive and other != tank:
                                 if math.hypot(other.x - cand_px, other.y - cand_py) < tile_size * 0.9:
@@ -577,7 +533,68 @@ class AttackTargetCommand(BaseCommand):
             self.move_subcmd = MoveCommand(dest_x, dest_y, tolerance=4.0, auto_clear_path=self.auto_clear_path)
             self.last_target_pos = (tx, ty)
 
+        # 核心默认预设行为：当被攻击对象刚好进入自己射程且视线畅通时，不继续前进，原地瞄准直接开火；只有出了射程或视线被障碍物阻挡才追击推进
+        if in_range and los_clear:
+            tank.angle = target_angle
+            self.stuck_attack_frames = 0
+            if tank.can_fire(physics_engine.limited_ammo_enabled):
+                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=target_angle)
+            return False
+
+        # 视线受阻时，若弹药无限且已对齐，可尝试轰击砖墙破障
+        if not los_clear:
+            is_infinite = (tank.ammo < 0 or not physics_engine.limited_ammo_enabled)
+            if is_infinite and (is_aligned_v or is_aligned_h):
+                tank.angle = target_angle
+                if tank.can_fire(physics_engine.limited_ammo_enabled):
+                    self.stuck_attack_frames = 0
+                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=target_angle)
+                    return False
+
+        # 机会射击 (Opportunistic Fire)：360° 检查视野内是否有其他可直接开火的敌军
+        opp_tanks = physics_engine.enemy_tanks if tank.camp == Camp.PLAYER else physics_engine.player_tanks
+        if tank.camp == Camp.PLAYER and getattr(tank, "ai_script", None) is None:
+            cands = physics_engine.get_visible_enemies()
+        else:
+            cands = [t for t in opp_tanks if t.alive]
+
+        for cand in cands:
+            if cand == self.target_tank or not cand.alive:
+                continue
+            cand_cx = cand.x + cand.size / 2.0
+            cand_cy = cand.y + cand.size / 2.0
+            c_dx = cand_cx - center_x
+            c_dy = cand_cy - center_y
+            c_dist = math.hypot(c_dx, c_dy)
+            if c_dist < 260.0 and self.is_line_of_sight_clear(center_x, center_y, cand_cx, cand_cy, game_map):
+                c_angle = (math.degrees(math.atan2(c_dx, -c_dy))) % 360.0
+                tank.angle = c_angle
+                if tank.can_fire(physics_engine.limited_ammo_enabled):
+                    physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=c_angle)
+                break
+
+        # 如果自身是固定防御塔，不执行位移
+        if tank.is_tower or tank.speed <= 0:
+            tank.angle = target_angle
+            if tank.can_fire(physics_engine.limited_ammo_enabled):
+                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=target_angle)
+            return False
+
         subcmd_done = self.move_subcmd.execute(tank, physics_engine, game_map)
+
+        # 追击推进途中实时检测：一旦刚好进入自己射程且视线畅通，立即停止前进原地开火
+        new_cx = tank.x + tank.size / 2.0
+        new_cy = tank.y + tank.size / 2.0
+        new_dx = target_center_x - new_cx
+        new_dy = target_center_y - new_cy
+        new_dist = math.hypot(new_dx, new_dy)
+        if new_dist <= attack_range and self.is_line_of_sight_clear(new_cx, new_cy, target_center_x, target_center_y, game_map):
+            self.move_subcmd = None
+            tank.angle = (math.degrees(math.atan2(new_dx, -new_dy))) % 360.0
+            self.stuck_attack_frames = 0
+            if tank.can_fire(physics_engine.limited_ammo_enabled):
+                physics_engine.spawn_bullet(tank, b_speed, b_size, b_color, angle=tank.angle)
+            return False
 
         if self.move_subcmd.stuck_frames > 0:
             self.stuck_attack_frames += 1
@@ -811,5 +828,78 @@ class HarvestCommand(BaseCommand):
             else:
                 tank.stop_harvest()
                 return True
+
+        return False
+
+
+class AttackGroundCommand(BaseCommand):
+    """
+    强制攻击地块命令 (Force Attack Ground):
+    - 仅对具备范围伤害能力 (splash_radius > 0) 的作战单位生效
+    - 锁定地图指定像素坐标 (target_x, target_y) 或瓦片中心
+    - 处于射程内且视线通畅时停驻射击；超出射程或被遮挡时机动靠近至射程内开火
+    - 持续对地轰击，直到下达新指令 (如 Move 或 Stop) 或弹药耗尽
+    """
+    def __init__(self, target_x: float, target_y: float, auto_clear_path: bool = False, max_range: float = 240.0):
+        self.target_x = float(target_x)
+        self.target_y = float(target_y)
+        self.auto_clear_path = auto_clear_path
+        self.max_range = float(max_range)
+        self.move_subcmd: Optional[MoveCommand] = None
+
+    def execute(self, tank: Tank, physics_engine, game_map: GameMap) -> bool:
+        if not tank.alive or getattr(tank, "is_converting", False):
+            return True
+        # 仅限具备范围伤害的单位
+        if getattr(tank, "splash_radius", 0.0) <= 0:
+            return True
+
+        center_x = tank.x + tank.size / 2.0
+        center_y = tank.y + tank.size / 2.0
+        dx = self.target_x - center_x
+        dy = self.target_y - center_y
+        dist = math.hypot(dx, dy)
+
+        target_angle = (math.degrees(math.atan2(dx, -dy))) % 360.0
+
+        # 如果自身是固定防御塔，不执行位移，直接朝向目标点开火
+        if tank.is_tower or tank.speed <= 0:
+            tank.angle = target_angle
+            if tank.can_fire(physics_engine.limited_ammo_enabled):
+                physics_engine.spawn_bullet(tank, angle=target_angle, target_pos=(self.target_x, self.target_y))
+            return False
+
+        # 检查是否在射程内且视线通畅（允许直接轰击）
+        in_range = (dist <= self.max_range)
+        los_clear = self.is_line_of_sight_clear(center_x, center_y, self.target_x, self.target_y, game_map)
+
+        if in_range and los_clear:
+            self.move_subcmd = None
+            tank.angle = target_angle
+            if tank.can_fire(physics_engine.limited_ammo_enabled):
+                physics_engine.spawn_bullet(tank, angle=target_angle, target_pos=(self.target_x, self.target_y))
+            return False
+
+        # 超出射程或视线受阻，机动靠近至射程之内（距离目标约 max_range * 0.7 处）
+        standoff_dist = max(60.0, self.max_range * 0.7)
+        if dist > 1e-4:
+            approach_x = self.target_x - (dx / dist) * standoff_dist
+            approach_y = self.target_y - (dy / dist) * standoff_dist
+        else:
+            approach_x = self.target_x
+            approach_y = self.target_y
+
+        if self.move_subcmd is None or abs(self.move_subcmd.dest_x - approach_x) > 20.0 or abs(self.move_subcmd.dest_y - approach_y) > 20.0:
+            self.move_subcmd = MoveCommand(dest_x=approach_x, dest_y=approach_y, tolerance=15.0, auto_clear_path=self.auto_clear_path)
+
+        done = self.move_subcmd.execute(tank, physics_engine, game_map)
+        # 若在靠近途中已经可以通畅射击，立刻转向开火
+        new_cx = tank.x + tank.size / 2.0
+        new_cy = tank.y + tank.size / 2.0
+        if math.hypot(self.target_x - new_cx, self.target_y - new_cy) <= self.max_range:
+            if self.is_line_of_sight_clear(new_cx, new_cy, self.target_x, self.target_y, game_map):
+                tank.angle = target_angle
+                if tank.can_fire(physics_engine.limited_ammo_enabled):
+                    physics_engine.spawn_bullet(tank, angle=target_angle, target_pos=(self.target_x, self.target_y))
 
         return False

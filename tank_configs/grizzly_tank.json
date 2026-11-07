@@ -1,6 +1,6 @@
 {
   "name": "Grizzly Tank",
-  "speed": 2.2,
+  "speed": 2.4,
   "size": 30,
   "color": "#7F8C8D",
   "track_color": "#2C3E50",
@@ -13,6 +13,11 @@
   "can_attack": true,
   "can_crush_bricks": false,
   "crush_speed_factor": 0.5,
+  "accuracy": 0.9,
+  "dodge": 0.25,
+  "splash_radius": 0.0,
+  "friendly_fire": 0,
+  "attack_range": 240.0,
   "converter_table": [],
   "harvest_speed": {
     "dark_matter": 2.0,

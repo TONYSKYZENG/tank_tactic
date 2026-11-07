@@ -1,0 +1,15 @@
+{
+  "id": "recipe_build_flame",
+  "name": "converter.recipe.build_flame",
+  "inputs": {
+    "alloy": 15.0,
+    "dark_matter": 10.0
+  },
+  "outputs": "tank",
+  "output_type": "tank",
+  "tank_config": "tank_configs/flame_tank.json",
+  "visibility": 1.0,
+  "vision_size": 270.0,
+  "ammo": 25,
+  "duration": 4.0
+}

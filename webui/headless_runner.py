@@ -144,32 +144,45 @@ class HeadlessGameRunner(QObject):
             req_y = p_info.spawn.y * tile_size
             sx, sy = self.physics_engine.find_nearest_free_position(req_x, req_y, cfg.size)
 
-            tank = Tank(
-                x=sx,
-                y=sy,
-                size=cfg.size,
-                speed=cfg.speed,
-                camp=Camp.PLAYER,
-                color=cfg.color,
-                health=cfg.health,
-                tank_id=p_info.id,
-                vision_size=p_info.vision_size,
-                ammo=p_info.ammo,
-                visibility=getattr(p_info, "visibility", 1.0),
-                is_tower=cfg.is_tower,
-                can_attack=cfg.can_attack,
-                tower_type=cfg.tower_type,
-                resupply_radius=cfg.resupply_radius,
-                resupply_interval=cfg.resupply_interval,
-                unit_type=cfg.name,
-                controllable=getattr(p_info, "controllable", True),
-                ai_script=getattr(p_info, "ai_script", None),
-                can_crush_bricks=getattr(cfg, "can_crush_bricks", False),
-                crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5),
-                converter_table=p_info.converter_table if getattr(p_info, "converter_table", None) is not None else getattr(cfg, "converter_table", []),
-                harvest_speed=getattr(cfg, "harvest_speed", None)
-            )
-            tank.fire_cooldown_max = cfg.fire_cooldown
+            p_extra = getattr(p_info, "extra_attrs", {})
+            tank_kwargs = {
+                "x": sx,
+                "y": sy,
+                "size": int(p_extra.get("size", cfg.size)),
+                "speed": float(p_extra.get("speed", cfg.speed)),
+                "camp": Camp.PLAYER,
+                "color": str(p_extra.get("color", cfg.color)),
+                "health": int(p_extra.get("health", cfg.health)),
+                "tank_id": p_info.id,
+                "vision_size": float(p_extra.get("vision_size", p_info.vision_size)),
+                "ammo": int(p_extra.get("ammo", p_info.ammo)),
+                "visibility": float(p_extra.get("visibility", getattr(p_info, "visibility", 1.0))),
+                "is_tower": bool(p_extra.get("is_tower", cfg.is_tower)),
+                "can_attack": bool(p_extra.get("can_attack", cfg.can_attack)),
+                "tower_type": str(p_extra.get("tower_type", cfg.tower_type)),
+                "resupply_radius": float(p_extra.get("resupply_radius", cfg.resupply_radius)),
+                "resupply_interval": int(p_extra.get("resupply_interval", cfg.resupply_interval)),
+                "unit_type": str(p_extra.get("unit_type", cfg.name)),
+                "controllable": bool(p_extra.get("controllable", getattr(p_info, "controllable", True))),
+                "ai_script": p_extra.get("ai_script", getattr(p_info, "ai_script", None)),
+                "can_crush_bricks": bool(p_extra.get("can_crush_bricks", getattr(cfg, "can_crush_bricks", False))),
+                "crush_speed_factor": float(p_extra.get("crush_speed_factor", getattr(cfg, "crush_speed_factor", 0.5))),
+                "converter_table": p_info.converter_table if getattr(p_info, "converter_table", None) is not None else p_extra.get("converter_table", getattr(cfg, "converter_table", [])),
+                "harvest_speed": p_extra.get("harvest_speed", getattr(cfg, "harvest_speed", None)),
+                "accuracy": float(p_extra.get("accuracy", getattr(cfg, "accuracy", 1.0))),
+                "dodge": float(p_extra.get("dodge", getattr(cfg, "dodge", 0.0))),
+                "splash_radius": float(p_extra.get("splash_radius", getattr(cfg, "splash_radius", 0.0))),
+                "friendly_fire": int(p_extra.get("friendly_fire", getattr(cfg, "friendly_fire", 0))),
+                "bullet_speed": float(p_extra.get("bullet_speed", getattr(cfg, "bullet_speed", 6.0))),
+                "bullet_size": int(p_extra.get("bullet_size", getattr(cfg, "bullet_size", 12))),
+                "bullet_color": str(p_extra.get("bullet_color", getattr(cfg, "bullet_color", "#FFFFFF"))),
+            }
+            for k, v in p_extra.items():
+                if k not in tank_kwargs:
+                    tank_kwargs[k] = v
+
+            tank = Tank(**tank_kwargs)
+            tank.fire_cooldown_max = int(p_extra.get("fire_cooldown", cfg.fire_cooldown))
             tank._config = cfg
             self.physics_engine.add_player_tank(tank)
             self.command_dispatcher.register_tank(tank)
@@ -182,32 +195,45 @@ class HeadlessGameRunner(QObject):
             req_ey = enemy_info.spawn.y * tile_size
             ex, ey = self.physics_engine.find_nearest_free_position(req_ex, req_ey, cfg.size)
 
-            tank = Tank(
-                x=ex,
-                y=ey,
-                size=cfg.size,
-                speed=cfg.speed,
-                camp=Camp.ENEMY,
-                color=cfg.color,
-                health=cfg.health,
-                tank_id=enemy_info.id,
-                vision_size=enemy_info.vision_size,
-                ammo=enemy_info.ammo,
-                visibility=enemy_info.visibility,
-                is_tower=cfg.is_tower,
-                can_attack=cfg.can_attack,
-                tower_type=cfg.tower_type,
-                resupply_radius=cfg.resupply_radius,
-                resupply_interval=cfg.resupply_interval,
-                unit_type=cfg.name,
-                controllable=getattr(enemy_info, "controllable", False),
-                ai_script=getattr(enemy_info, "ai_script", None),
-                can_crush_bricks=getattr(cfg, "can_crush_bricks", False),
-                crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5),
-                converter_table=enemy_info.converter_table if getattr(enemy_info, "converter_table", None) is not None else getattr(cfg, "converter_table", []),
-                harvest_speed=getattr(cfg, "harvest_speed", None)
-            )
-            tank.fire_cooldown_max = cfg.fire_cooldown
+            e_extra = getattr(enemy_info, "extra_attrs", {})
+            e_kwargs = {
+                "x": ex,
+                "y": ey,
+                "size": int(e_extra.get("size", cfg.size)),
+                "speed": float(e_extra.get("speed", cfg.speed)),
+                "camp": Camp.ENEMY,
+                "color": str(e_extra.get("color", cfg.color)),
+                "health": int(e_extra.get("health", cfg.health)),
+                "tank_id": enemy_info.id,
+                "vision_size": float(e_extra.get("vision_size", enemy_info.vision_size)),
+                "ammo": int(e_extra.get("ammo", enemy_info.ammo)),
+                "visibility": float(e_extra.get("visibility", enemy_info.visibility)),
+                "is_tower": bool(e_extra.get("is_tower", cfg.is_tower)),
+                "can_attack": bool(e_extra.get("can_attack", cfg.can_attack)),
+                "tower_type": str(e_extra.get("tower_type", cfg.tower_type)),
+                "resupply_radius": float(e_extra.get("resupply_radius", cfg.resupply_radius)),
+                "resupply_interval": int(e_extra.get("resupply_interval", cfg.resupply_interval)),
+                "unit_type": str(e_extra.get("unit_type", cfg.name)),
+                "controllable": bool(e_extra.get("controllable", getattr(enemy_info, "controllable", False))),
+                "ai_script": e_extra.get("ai_script", getattr(enemy_info, "ai_script", None)),
+                "can_crush_bricks": bool(e_extra.get("can_crush_bricks", getattr(cfg, "can_crush_bricks", False))),
+                "crush_speed_factor": float(e_extra.get("crush_speed_factor", getattr(cfg, "crush_speed_factor", 0.5))),
+                "converter_table": enemy_info.converter_table if getattr(enemy_info, "converter_table", None) is not None else e_extra.get("converter_table", getattr(cfg, "converter_table", [])),
+                "harvest_speed": e_extra.get("harvest_speed", getattr(cfg, "harvest_speed", None)),
+                "accuracy": float(e_extra.get("accuracy", getattr(cfg, "accuracy", 1.0))),
+                "dodge": float(e_extra.get("dodge", getattr(cfg, "dodge", 0.0))),
+                "splash_radius": float(e_extra.get("splash_radius", getattr(cfg, "splash_radius", 0.0))),
+                "friendly_fire": int(e_extra.get("friendly_fire", getattr(cfg, "friendly_fire", 0))),
+                "bullet_speed": float(e_extra.get("bullet_speed", getattr(cfg, "bullet_speed", 6.0))),
+                "bullet_size": int(e_extra.get("bullet_size", getattr(cfg, "bullet_size", 12))),
+                "bullet_color": str(e_extra.get("bullet_color", getattr(cfg, "bullet_color", "#FFFFFF"))),
+            }
+            for k, v in e_extra.items():
+                if k not in e_kwargs:
+                    e_kwargs[k] = v
+
+            tank = Tank(**e_kwargs)
+            tank.fire_cooldown_max = int(e_extra.get("fire_cooldown", cfg.fire_cooldown))
             tank._config = cfg
             self.ai_controller.register_enemy(tank, cfg, enemy_info.tactic)
 
@@ -241,7 +267,7 @@ class HeadlessGameRunner(QObject):
                 ry = min(y1, y2)
                 self.selection_mgr.select_box(Rect(rx, ry, rw, rh), self.physics_engine.player_tanks)
 
-        elif ev_type == "context_cmd":
+        elif ev_type in ("context_cmd", "attack_ground", "force_attack_ground"):
             selected = self.selection_mgr.get_selected()
             if not selected:
                 micro = self.selection_mgr.get_micro_tank()
@@ -249,6 +275,14 @@ class HeadlessGameRunner(QObject):
                     selected = [micro]
 
             if selected:
+                is_ctrl = bool(data.get("ctrl") or data.get("is_ctrl") or ev_type in ("attack_ground", "force_attack_ground"))
+                if is_ctrl:
+                    aoe_tanks = [t for t in selected if getattr(t, "splash_radius", 0.0) > 0]
+                    if aoe_tanks:
+                        self.command_dispatcher.issue_attack_ground(aoe_tanks, x, y)
+                        self.command_marker = (x, y, True, 25)
+                        return
+
                 # 1. 检查是否右键友军 -> 护卫该友军
                 target_friendly = None
                 for ally in self.physics_engine.player_tanks:

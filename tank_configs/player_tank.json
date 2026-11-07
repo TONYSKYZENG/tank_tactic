@@ -17,6 +17,7 @@
     "recipe_build_rhino",
     "recipe_build_mcv",
     "recipe_build_apocalypse",
+    "recipe_build_flame",
     "recipe_build_tank"
   ]
 }

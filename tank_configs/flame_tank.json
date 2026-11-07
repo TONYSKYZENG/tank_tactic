@@ -1,0 +1,26 @@
+{
+  "name": "Flame Tank",
+  "speed": 2.0,
+  "size": 32,
+  "color": "#D35400",
+  "track_color": "#2C3E50",
+  "bullet_speed": 5.5,
+  "bullet_size": 16,
+  "bullet_color": "#FF4500",
+  "fire_cooldown": 14,
+  "health": 4,
+  "is_tower": false,
+  "can_attack": true,
+  "can_crush_bricks": false,
+  "crush_speed_factor": 0.5,
+  "accuracy": 0.95,
+  "dodge": 0.1,
+  "splash_radius": 56.0,
+  "friendly_fire": 1,
+  "attack_range": 180.0,
+  "converter_table": [],
+  "harvest_speed": {
+    "dark_matter": 1.8,
+    "alloy": 1.5
+  }
+}

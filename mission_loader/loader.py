@@ -15,9 +15,14 @@ class MissionLoader:
         fog_of_war = data.get("fog_of_war", True)
         limited_ammo = data.get("limited_ammo", True)
 
+        std_keys = {"id", "config_file", "spawn", "vision_size", "ammo", "visibility", "controllable", "ai_script", "converter_table", "tactic", "extra_attrs"}
+
         # 1. 兼容单人 player 字段
         player_data = data.get("player", {})
         player_spawn = player_data.get("spawn", {"x": 6, "y": 14})
+        p_extra = {k: v for k, v in player_data.items() if k not in std_keys}
+        if "extra_attrs" in player_data and isinstance(player_data["extra_attrs"], dict):
+            p_extra.update(player_data["extra_attrs"])
         single_player_info = PlayerMissionInfo(
             id=player_data.get("id", "player_alpha"),
             config_file=player_data.get("config_file", "tank_configs/player_tank.json"),
@@ -27,7 +32,8 @@ class MissionLoader:
             visibility=float(player_data.get("visibility", 1.0)),
             controllable=bool(player_data.get("controllable", True)),
             ai_script=player_data.get("ai_script", None),
-            converter_table=player_data.get("converter_table", None)
+            converter_table=player_data.get("converter_table", None),
+            extra_attrs=p_extra
         )
 
         # 2. 我方多车编队列表 player_units
@@ -35,6 +41,9 @@ class MissionLoader:
         if "player_units" in data:
             for p in data["player_units"]:
                 pspawn = p.get("spawn", {"x": 0, "y": 0})
+                pextra = {k: v for k, v in p.items() if k not in std_keys}
+                if "extra_attrs" in p and isinstance(p["extra_attrs"], dict):
+                    pextra.update(p["extra_attrs"])
                 player_units.append(PlayerMissionInfo(
                     id=p.get("id", f"player_{len(player_units)+1}"),
                     config_file=p.get("config_file", "tank_configs/player_tank.json"),
@@ -44,7 +53,8 @@ class MissionLoader:
                     visibility=float(p.get("visibility", 1.0)),
                     controllable=bool(p.get("controllable", True)),
                     ai_script=p.get("ai_script", None),
-                    converter_table=p.get("converter_table", None)
+                    converter_table=p.get("converter_table", None),
+                    extra_attrs=pextra
                 ))
         else:
             player_units = [single_player_info]
@@ -53,6 +63,9 @@ class MissionLoader:
         enemies_info = []
         for e in data.get("enemies", []):
             espawn = e.get("spawn", {"x": 0, "y": 0})
+            eextra = {k: v for k, v in e.items() if k not in std_keys}
+            if "extra_attrs" in e and isinstance(e["extra_attrs"], dict):
+                eextra.update(e["extra_attrs"])
             enemies_info.append(EnemyMissionInfo(
                 id=e.get("id", f"enemy_{len(enemies_info)+1}"),
                 config_file=e.get("config_file", "tank_configs/enemy_basic.json"),
@@ -63,7 +76,8 @@ class MissionLoader:
                 visibility=float(e.get("visibility", 1.0)),
                 controllable=bool(e.get("controllable", False)),
                 ai_script=e.get("ai_script", None),
-                converter_table=e.get("converter_table", None)
+                converter_table=e.get("converter_table", None),
+                extra_attrs=eextra
             ))
 
         p_init_res = data.get("player_initial_resources") or data.get("initial_resources", None)

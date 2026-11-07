@@ -433,7 +433,34 @@ attack('player_alpha, player_bravo', 320, 240)
 }
 ```
 
-#### 9.3 `api.command_set_tactic` (or `set_tactic` / `tactic`)
+#### 9.3 `api.command_attack_ground` (or `attack_ground` / `force_attack_ground`)
+Forces units capable of area-of-effect damage (`splash_radius > 0`, such as Apocalypse and Flame tanks) to bombard a designated ground location `(x, y)` or tile coordinate `(col, row)`. Shells detonate upon arriving at the ground target, destroying destructible obstacles and damaging units within the explosion radius.
+```text
+attack_ground(320, 240)
+attack_ground([player_alpha], 280, 160)
+force_attack_ground("player_alpha", 400, 300)
+```
+```json
+{
+  "action": "api.command_attack_ground",
+  "unit_ids": ["player_alpha"],
+  "x": 320.0,
+  "y": 240.0
+}
+```
+**Response:**
+```json
+{
+  "status": "ok",
+  "command": "command_attack_ground",
+  "target_x": 320.0,
+  "target_y": 240.0,
+  "affected_units": ["player_alpha"],
+  "count": 1
+}
+```
+
+#### 9.4 `api.command_set_tactic` (or `set_tactic` / `tactic`)
 Updates the combat posture of targeted units. Supported postures:
 - `"aggressive"` / `"1"`: Engage enemies on sight.
 - `"defensive"` / `"2"`: Hold position, defend localized perimeter.
@@ -931,9 +958,14 @@ or
   "config_file": "tank_configs/player_tank.json",
   "unit_id": "reinforcement_alpha",
   "health": 5,
-  "ammo": 40
+  "ammo": 40,
+  "accuracy": 0.95,
+  "dodge": 0.2,
+  "splash_radius": 45.0,
+  "friendly_fire": 0
 }
 ```
+*Note: Any template attribute (`accuracy`, `dodge`, `splash_radius`, `friendly_fire`, `bullet_speed`, `bullet_size`, `speed`, `health`, `can_crush_bricks`, etc.) can be directly overridden in `create_unit` and `edit_attr`.*
 
 #### Response:
 ```json

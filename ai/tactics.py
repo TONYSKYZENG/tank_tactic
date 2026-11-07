@@ -201,10 +201,19 @@ class ChargeBaseTactic(BaseTactic):
         cy = tank.y + tank.size / 2.0
         dx = base_x - cx
         dy = base_y - cy
-        target_angle = math.degrees(math.atan2(dx, -dy)) % 360.0 if math.hypot(dx, dy) > 1e-4 else tank.angle
+        dist = math.hypot(dx, dy)
+        target_angle = math.degrees(math.atan2(dx, -dy)) % 360.0 if dist > 1e-4 else tank.angle
+
+        cfg = getattr(tank, "_config", self.tank_config)
+        attack_range = float(getattr(tank, "attack_range", getattr(cfg, "attack_range", 240.0) if cfg else 240.0))
+        if attack_range <= 0:
+            attack_range = 240.0
 
         if self.is_line_of_sight_clear(cx, cy, base_x, base_y, game_map):
             tank.angle = target_angle
+            # 进入射程后停止前进直接开火
+            if dist <= attack_range:
+                return None, True
             steered = self._find_steered_angle(tank, target_angle, physics_engine)
             return (steered if steered is not None else target_angle), True
 
@@ -245,10 +254,15 @@ class HunterTactic(BaseTactic):
         dist = math.hypot(dx, dy)
         target_angle = math.degrees(math.atan2(dx, -dy)) % 360.0 if dist > 1e-4 else tank.angle
 
-        # 1. 360° 视线畅通时直接对准开火并斜向逼近
+        cfg = getattr(tank, "_config", self.tank_config)
+        attack_range = float(getattr(tank, "attack_range", getattr(cfg, "attack_range", 240.0) if cfg else 240.0))
+        if attack_range <= 0:
+            attack_range = 240.0
+
+        # 1. 360° 视线畅通时：当被攻击对象刚好进入自己射程后就不继续前进，只有出了射程才追击前进
         if self.is_line_of_sight_clear(center_x, center_y, p_center_x, p_center_y, game_map):
             tank.angle = target_angle
-            if dist <= tank.size * 1.6:
+            if dist <= attack_range:
                 return None, True
             steered = self._find_steered_angle(tank, target_angle, physics_engine)
             return (steered if steered is not None else target_angle), True

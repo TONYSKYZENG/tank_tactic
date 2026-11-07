@@ -251,7 +251,14 @@ class UnitConverter:
                 can_crush_bricks=getattr(cfg, "can_crush_bricks", False),
                 crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5),
                 converter_table=getattr(cfg, "converter_table", []),
-                harvest_speed=getattr(cfg, "harvest_speed", None)
+                harvest_speed=getattr(cfg, "harvest_speed", None),
+                accuracy=getattr(cfg, "accuracy", 1.0),
+                dodge=getattr(cfg, "dodge", 0.0),
+                splash_radius=getattr(cfg, "splash_radius", 0.0),
+                friendly_fire=getattr(cfg, "friendly_fire", 0),
+                bullet_speed=getattr(cfg, "bullet_speed", 6.0),
+                bullet_size=getattr(cfg, "bullet_size", 12),
+                bullet_color=getattr(cfg, "bullet_color", "#FFFFFF")
             )
             new_tank.fire_cooldown_max = cfg.fire_cooldown
             new_tank._config = cfg

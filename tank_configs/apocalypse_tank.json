@@ -13,6 +13,11 @@
   "can_attack": true,
   "can_crush_bricks": true,
   "crush_speed_factor": 0.75,
+  "accuracy": 0.85,
+  "dodge": 0.05,
+  "splash_radius": 48.0,
+  "friendly_fire": 0,
+  "attack_range": 280.0,
   "converter_table": [
     "recipe_dm_to_alloy",
     "recipe_alloy_to_dm",

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QPushButton, QComboBox,
     QGroupBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QScrollArea, QFrame,
     QCheckBox, QMessageBox, QListWidget, QListWidgetItem, QTabWidget
 )
@@ -400,7 +400,97 @@ class MissionEditorWidget(QWidget):
 
         self.prop_layout.addWidget(self.ctrl_group)
 
-        # 5. 单位模板规格速查
+        # 5. 属性重载与微调（采用单列布局，彻底解决并列双栏导致文字挤压截断问题）
+        self.override_group = QGroupBox("5. 属性覆盖与微调")
+        override_layout = QFormLayout(self.override_group)
+        override_layout.setLabelAlignment(Qt.AlignLeft)
+        override_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+
+        self.lbl_hp_tag = QLabel("生命值 (HP):")
+        self.spin_health = QSpinBox()
+        self.spin_health.setRange(1, 9999)
+        self.spin_health.setValue(3)
+        self.spin_health.valueChanged.connect(self._on_prop_changed)
+        override_layout.addRow(self.lbl_hp_tag, self.spin_health)
+
+        self.lbl_spd_tag = QLabel("移动速度:")
+        self.spin_speed = QDoubleSpinBox()
+        self.spin_speed.setRange(0.0, 25.0)
+        self.spin_speed.setSingleStep(0.2)
+        self.spin_speed.setValue(2.5)
+        self.spin_speed.valueChanged.connect(self._on_prop_changed)
+        override_layout.addRow(self.lbl_spd_tag, self.spin_speed)
+
+        self.lbl_range_tag = QLabel("攻击射程 (px):")
+        self.spin_attack_range = QDoubleSpinBox()
+        self.spin_attack_range.setRange(10.0, 2000.0)
+        self.spin_attack_range.setSingleStep(10.0)
+        self.spin_attack_range.setValue(240.0)
+        self.spin_attack_range.setToolTip("武器有效攻击射程 (像素)，进入射程后即停止前进原地瞄准开火")
+        self.spin_attack_range.valueChanged.connect(self._on_prop_changed)
+        override_layout.addRow(self.lbl_range_tag, self.spin_attack_range)
+
+        self.lbl_acc_tag = QLabel("瞄准精度 p (0~1):")
+        self.spin_accuracy = QDoubleSpinBox()
+        self.spin_accuracy.setRange(0.0, 1.0)
+        self.spin_accuracy.setSingleStep(0.05)
+        self.spin_accuracy.setValue(1.0)
+        self.spin_accuracy.valueChanged.connect(self._on_prop_changed)
+        override_layout.addRow(self.lbl_acc_tag, self.spin_accuracy)
+
+        self.lbl_ddg_tag = QLabel("闪避率 q (0~1):")
+        self.spin_dodge = QDoubleSpinBox()
+        self.spin_dodge.setRange(0.0, 1.0)
+        self.spin_dodge.setSingleStep(0.05)
+        self.spin_dodge.setValue(0.0)
+        self.spin_dodge.valueChanged.connect(self._on_prop_changed)
+        override_layout.addRow(self.lbl_ddg_tag, self.spin_dodge)
+
+        self.lbl_splash_tag = QLabel("爆炸范围半径:")
+        self.spin_splash_radius = QDoubleSpinBox()
+        self.spin_splash_radius.setRange(0.0, 500.0)
+        self.spin_splash_radius.setSingleStep(5.0)
+        self.spin_splash_radius.setValue(0.0)
+        self.spin_splash_radius.setToolTip("0 为单体伤害不启用 AoE，>0 启用爆炸范围伤害")
+        self.spin_splash_radius.valueChanged.connect(self._on_prop_changed)
+        override_layout.addRow(self.lbl_splash_tag, self.spin_splash_radius)
+
+        self.lbl_ff_tag = QLabel("友军误伤:")
+        self.combo_friendly_fire = QComboBox()
+        self.combo_friendly_fire.addItems(["0: 否 (不伤害友军)", "1: 是 (开启友军误伤)"])
+        self.combo_friendly_fire.currentIndexChanged.connect(self._on_prop_changed)
+        override_layout.addRow(self.lbl_ff_tag, self.combo_friendly_fire)
+
+        self.lbl_cd_tag = QLabel("开火冷却 (帧):")
+        self.spin_fire_cooldown = QSpinBox()
+        self.spin_fire_cooldown.setRange(1, 600)
+        self.spin_fire_cooldown.setValue(15)
+        self.spin_fire_cooldown.valueChanged.connect(self._on_prop_changed)
+        override_layout.addRow(self.lbl_cd_tag, self.spin_fire_cooldown)
+
+        self.chk_crush_bricks = QCheckBox("允许物理碾压砖块")
+        self.chk_crush_bricks.toggled.connect(self._on_prop_changed)
+        override_layout.addRow(QLabel("碾压砖块:"), self.chk_crush_bricks)
+
+        self.prop_layout.addWidget(self.override_group)
+
+        # 6. 任意扩展属性 (JSON)
+        self.custom_json_group = QGroupBox("6. 任意扩展属性 (Custom JSON)")
+        json_layout = QVBoxLayout(self.custom_json_group)
+        self.lbl_custom_json_hint = QLabel("可输入任意键值对 (如 bullet_speed, bullet_color 等):")
+        self.lbl_custom_json_hint.setStyleSheet("color: #888; font-size: 11px;")
+        json_layout.addWidget(self.lbl_custom_json_hint)
+        self.edit_extra_json = QPlainTextEdit()
+        self.edit_extra_json.setPlaceholderText('{\n  "bullet_speed": 7.0,\n  "bullet_color": "#FF0000"\n}')
+        self.edit_extra_json.setMinimumHeight(65)
+        self.edit_extra_json.setMaximumHeight(130)
+        self.edit_extra_json.setStyleSheet("background-color: #151310; border: 1px solid #5C482C; color: #E0E0E0; font-family: monospace;")
+        self.edit_extra_json.textChanged.connect(self._on_custom_json_changed)
+        json_layout.addWidget(self.edit_extra_json)
+
+        self.prop_layout.addWidget(self.custom_json_group)
+
+        # 7. 单位模板规格速查
         self.lbl_template_info = QLabel("单位模板规格: --")
         self.lbl_template_info.setStyleSheet("color: #A6ACAF; font-size: 11px; padding: 6px; background: #13110E; border: 1px dashed #3E301E;")
         self.lbl_template_info.setWordWrap(True)
@@ -473,6 +563,20 @@ class MissionEditorWidget(QWidget):
         self.chk_controllable.setText(t("editor.mission.controllable"))
         self.lbl_script_tag.setText(t("editor.mission.ai_script"))
         self.lbl_tactic_tag.setText(t("editor.mission.enemy_tactic"))
+
+        self.override_group.setTitle(t("editor.mission.overrides"))
+        self.lbl_hp_tag.setText(t("editor.mission.health"))
+        self.lbl_spd_tag.setText(t("editor.mission.speed"))
+        self.lbl_range_tag.setText(t("editor.mission.attack_range", "攻击射程 (px):"))
+        self.lbl_acc_tag.setText(t("editor.mission.accuracy"))
+        self.lbl_ddg_tag.setText(t("editor.mission.dodge"))
+        self.lbl_splash_tag.setText(t("editor.mission.splash_radius"))
+        self.lbl_ff_tag.setText(t("editor.mission.friendly_fire"))
+        self.lbl_cd_tag.setText(t("editor.mission.fire_cooldown"))
+        self.chk_crush_bricks.setText(t("editor.mission.crush_bricks"))
+
+        self.custom_json_group.setTitle(t("editor.mission.custom_json"))
+        self.lbl_custom_json_hint.setText(t("editor.mission.custom_json_hint"))
 
         self._refresh_unit_list()
 
@@ -596,6 +700,8 @@ class MissionEditorWidget(QWidget):
             }
             if p.ai_script:
                 item["ai_script"] = p.ai_script
+            if getattr(p, "extra_attrs", None):
+                item.update(p.extra_attrs)
             player_units_data.append(item)
 
         enemies_data = []
@@ -612,6 +718,8 @@ class MissionEditorWidget(QWidget):
             }
             if e.ai_script:
                 item["ai_script"] = e.ai_script
+            if getattr(e, "extra_attrs", None):
+                item.update(e.extra_attrs)
             enemies_data.append(item)
 
         primary_player = player_units_data[0] if player_units_data else {
@@ -711,10 +819,40 @@ class MissionEditorWidget(QWidget):
                 self.combo_tactic.setCurrentIndex(i)
                 break
 
+        # 属性覆盖与微调
+        extra = getattr(unit, "extra_attrs", {})
+        if extra is None:
+            extra = {}
+            unit.extra_attrs = extra
+
+        cfg = None
+        path = self.base_dir / unit.config_file
+        if path.exists():
+            try:
+                cfg = TankConfig.from_json(path)
+            except Exception:
+                pass
+
+        self.spin_health.setValue(int(extra.get("health", cfg.health if cfg else 3)))
+        self.spin_speed.setValue(float(extra.get("speed", cfg.speed if cfg else 2.5)))
+        self.spin_attack_range.setValue(float(extra.get("attack_range", getattr(cfg, "attack_range", 240.0) if cfg else 240.0)))
+        self.spin_accuracy.setValue(float(extra.get("accuracy", getattr(cfg, "accuracy", 1.0) if cfg else 1.0)))
+        self.spin_dodge.setValue(float(extra.get("dodge", getattr(cfg, "dodge", 0.0) if cfg else 0.0)))
+        self.spin_splash_radius.setValue(float(extra.get("splash_radius", getattr(cfg, "splash_radius", 0.0) if cfg else 0.0)))
+        ff_val = int(extra.get("friendly_fire", getattr(cfg, "friendly_fire", 0) if cfg else 0))
+        self.combo_friendly_fire.setCurrentIndex(1 if ff_val == 1 else 0)
+        self.spin_fire_cooldown.setValue(int(extra.get("fire_cooldown", cfg.fire_cooldown if cfg else 15)))
+        self.chk_crush_bricks.setChecked(bool(extra.get("can_crush_bricks", getattr(cfg, "can_crush_bricks", False) if cfg else False)))
+
+        core_keys = {"health", "speed", "attack_range", "accuracy", "dodge", "splash_radius", "friendly_fire", "fire_cooldown", "can_crush_bricks"}
+        custom_attrs = {k: v for k, v in extra.items() if k not in core_keys}
+        self.edit_extra_json.setPlainText(json.dumps(custom_attrs, indent=2, ensure_ascii=False) if custom_attrs else "")
+
         self.block_prop_signals(False)
         self._update_template_preview(unit.config_file)
 
     def block_prop_signals(self, block: bool):
+        self._blocking_prop_signals = block
         self.edit_id.blockSignals(block)
         self.combo_camp.blockSignals(block)
         self.combo_config.blockSignals(block)
@@ -726,9 +864,19 @@ class MissionEditorWidget(QWidget):
         self.chk_controllable.blockSignals(block)
         self.combo_script.blockSignals(block)
         self.combo_tactic.blockSignals(block)
+        self.spin_health.blockSignals(block)
+        self.spin_speed.blockSignals(block)
+        self.spin_attack_range.blockSignals(block)
+        self.spin_accuracy.blockSignals(block)
+        self.spin_dodge.blockSignals(block)
+        self.spin_splash_radius.blockSignals(block)
+        self.combo_friendly_fire.blockSignals(block)
+        self.spin_fire_cooldown.blockSignals(block)
+        self.chk_crush_bricks.blockSignals(block)
+        self.edit_extra_json.blockSignals(block)
 
     def _on_prop_changed(self):
-        if not self.active_unit:
+        if not self.active_unit or getattr(self, "_blocking_prop_signals", False):
             return
 
         self.active_unit.id = self.edit_id.text().strip() or "unit"
@@ -747,9 +895,46 @@ class MissionEditorWidget(QWidget):
         if hasattr(self.active_unit, "tactic"):
             self.active_unit.tactic = tactic_raw
 
+        # 写入属性覆盖
+        if not hasattr(self.active_unit, "extra_attrs") or self.active_unit.extra_attrs is None:
+            self.active_unit.extra_attrs = {}
+
+        self.active_unit.extra_attrs["health"] = self.spin_health.value()
+        self.active_unit.extra_attrs["speed"] = round(self.spin_speed.value(), 2)
+        self.active_unit.extra_attrs["attack_range"] = round(self.spin_attack_range.value(), 1)
+        self.active_unit.extra_attrs["accuracy"] = round(self.spin_accuracy.value(), 2)
+        self.active_unit.extra_attrs["dodge"] = round(self.spin_dodge.value(), 2)
+        self.active_unit.extra_attrs["splash_radius"] = round(self.spin_splash_radius.value(), 1)
+        self.active_unit.extra_attrs["friendly_fire"] = 1 if self.combo_friendly_fire.currentIndex() == 1 else 0
+        self.active_unit.extra_attrs["fire_cooldown"] = self.spin_fire_cooldown.value()
+        self.active_unit.extra_attrs["can_crush_bricks"] = self.chk_crush_bricks.isChecked()
+
         self._refresh_unit_list()
         self.canvas.update()
         self.mission_modified.emit()
+
+    def _on_custom_json_changed(self):
+        if not self.active_unit or getattr(self, "_blocking_prop_signals", False):
+            return
+        json_str = self.edit_extra_json.toPlainText().strip()
+        core_keys = {"health", "speed", "attack_range", "accuracy", "dodge", "splash_radius", "friendly_fire", "fire_cooldown", "can_crush_bricks"}
+        if not hasattr(self.active_unit, "extra_attrs") or self.active_unit.extra_attrs is None:
+            self.active_unit.extra_attrs = {}
+
+        if not json_str:
+            self.active_unit.extra_attrs = {k: v for k, v in self.active_unit.extra_attrs.items() if k in core_keys}
+            self.mission_modified.emit()
+            return
+
+        try:
+            parsed = json.loads(json_str)
+            if isinstance(parsed, dict):
+                curr_core = {k: v for k, v in self.active_unit.extra_attrs.items() if k in core_keys}
+                curr_core.update(parsed)
+                self.active_unit.extra_attrs = curr_core
+                self.mission_modified.emit()
+        except Exception:
+            pass
 
     def _on_camp_changed(self, idx: int):
         if not self.active_unit:
@@ -758,6 +943,7 @@ class MissionEditorWidget(QWidget):
         is_currently_player = isinstance(self.active_unit, PlayerMissionInfo)
 
         if is_player_target != is_currently_player:
+            extra_copy = dict(getattr(self.active_unit, "extra_attrs", {}))
             # 阵营变更，转移所属集合
             if is_player_target:
                 # 敌军转我方
@@ -771,7 +957,8 @@ class MissionEditorWidget(QWidget):
                     ammo=self.active_unit.ammo,
                     visibility=self.active_unit.visibility,
                     controllable=True,
-                    ai_script=self.active_unit.ai_script
+                    ai_script=self.active_unit.ai_script,
+                    extra_attrs=extra_copy
                 )
                 self.player_units.append(new_u)
                 self.active_unit = new_u
@@ -788,7 +975,8 @@ class MissionEditorWidget(QWidget):
                     ammo=self.active_unit.ammo,
                     visibility=self.active_unit.visibility,
                     controllable=False,
-                    ai_script=self.active_unit.ai_script
+                    ai_script=self.active_unit.ai_script,
+                    extra_attrs=extra_copy
                 )
                 self.enemies.append(new_e)
                 self.active_unit = new_e
@@ -801,6 +989,24 @@ class MissionEditorWidget(QWidget):
     def _on_config_template_changed(self):
         cfg_name = self.combo_config.currentText()
         self._update_template_preview(cfg_name)
+        # 刷新覆盖控件为新模板默认属性
+        path = self.base_dir / cfg_name
+        if path.exists():
+            try:
+                cfg = TankConfig.from_json(path)
+                self.block_prop_signals(True)
+                self.spin_health.setValue(cfg.health)
+                self.spin_speed.setValue(cfg.speed)
+                self.spin_attack_range.setValue(getattr(cfg, "attack_range", 240.0))
+                self.spin_accuracy.setValue(getattr(cfg, "accuracy", 1.0))
+                self.spin_dodge.setValue(getattr(cfg, "dodge", 0.0))
+                self.spin_splash_radius.setValue(getattr(cfg, "splash_radius", 0.0))
+                self.combo_friendly_fire.setCurrentIndex(1 if getattr(cfg, "friendly_fire", 0) == 1 else 0)
+                self.spin_fire_cooldown.setValue(cfg.fire_cooldown)
+                self.chk_crush_bricks.setChecked(getattr(cfg, "can_crush_bricks", False))
+                self.block_prop_signals(False)
+            except Exception:
+                pass
         self._on_prop_changed()
 
     def _update_template_preview(self, cfg_file: str):

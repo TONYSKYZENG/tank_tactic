@@ -21,9 +21,16 @@ This project combines **Age of Empires-style RTS marquee selection and tactical 
   - Replaces rigid 4-cardinal direction constraints (UP/DOWN/LEFT/RIGHT) with continuous floating-point angular orientation (0°-360°) and smooth directional acceleration, complete with independent hull and turret rotation.
 - **🚜 Armored Roster & Physical Obstacle Crushing (`tank_configs/`)**:
   - **🦏 Rhino Tank (`rhino_tank.json`)**: Cheap, lightning-fast glass-cannon (speed 4.0, HP 1), capable of harvesting, cannot convert or construct, cheaply mass-produced.
-  - **🏗️ Mobile Construction Vehicle (`mcv_tank.json`)**: Heavy slow-mover (speed 1.6, HP 10), capable of crushing bricks, high-rate harvesting, resource conversion, and full unit assembly lines (constructs Rhinos, Apocalypses, and MCVs).
-  - **⚡ Apocalypse Tank (`apocalypse_tank.json`)**: Heavy main battle tank (speed 2.4, HP 6), heavy twin cannons, brick-crushing and resource conversion capabilities, combat specialist without unit production.
-  - **🚜 Clearing Tank (`clearing_tank.json`)**: Heavy engineering tank equipped with `can_crush_bricks` to directly bulldoze and crush normal red brick obstacles on contact without wasting ammo. Smart A* pathfinding treats bricks as traversable.
+  - **🐻 Grizzly Tank (`grizzly_tank.json`)**: Reworked agile main battle tank (speed 2.4, HP 2), high accuracy (0.9) and high evasion/dodge (0.25), direct kinetic cannon.
+  - **⚡ Apocalypse Tank (`apocalypse_tank.json`)**: Heavy dreadnought tank (speed 1.0, HP 6), twin cannons with massive explosive splash damage (`splash_radius: 48`, disciplined fire with `friendly_fire: 0`), brick-crushing and conversion capabilities.
+  - **🔥 Flame Tank (`flame_tank.json`)**: Brand-new assault vehicle (speed 2.0, HP 4), high aim precision (0.95), wide-area fiery splash damage (`splash_radius: 56`), with uncontrolled collateral damage (`friendly_fire: 1`)!
+  - **🏗️ Mobile Construction Vehicle (`mcv_tank.json`)**: Heavy slow-mover (speed 1.6, HP 10), capable of crushing bricks, high-rate harvesting, resource conversion, and full unit assembly lines.
+  - **🚜 Clearing Tank (`clearing_tank.json`)**: Heavy engineering tank equipped with `can_crush_bricks` to directly bulldoze and crush normal red brick obstacles on contact without wasting ammo.
+- **🎯 Combat Mechanics: Accuracy, Dodge, Splash Damage & Force Attack Ground**:
+  - **Hit Probability Formula**: Projectile hit tests evaluate attacker accuracy $p$ against defender dodge $q$: $P = p \times (1 - q)$.
+  - **Area-of-Effect & Friendly Fire**: Units support `splash_radius` ($\le 0$ disables, $> 0$ enables AoE explosive tile destruction and multi-target hits) and `friendly_fire` (0 protects friendlies, 1 damages friendlies).
+  - **Force Attack Ground**: Units capable of AoE damage can bombard designated ground coordinates/tiles; shells detonate on arrival.
+  - **Comprehensive Attribute Overrides**: `mission.json`, Network 3-in-1 API, and `ai_python` scripts support dynamically overriding any template attribute.
 - **📊 Auxiliary Omniscient Read-Only WebUI Monitor (`monitor/`, Always Online)**:
   - **Default bind `0.0.0.0`, default port `8088` (IP and port configurable via CLI)**.
   - **Read-Only**: Zero interactive controls or click events, specifically designed for secondary-screen telemetry, live spectating, and AI monitoring.
@@ -446,6 +453,7 @@ The game exposes three network endpoints communicating via **plaintext JSON**:
 | **`Right Mouse on Ground`** | Move selected units to target in formation |
 | **`Right Mouse on Friendly/Tower`** | **Selected units execute [Escort and Guard this Unit]** |
 | **`Right Mouse on Enemy`** | Focus fire and engage target |
+| **`Ctrl + Right Mouse` / `G`** | **【Force Attack Ground】** (AoE splash units bombard ground position) |
 | **`Tab` Key** | Cycle active micro-control tank (marked with golden `[▼MICRO]`) |
 | **`B` Key** | Toggle [Auto-Breaching (Bulldozer)] mode |
 | **`Arrow Keys / WASD`** | Directly steer the active micro tank (360° smooth turning) |

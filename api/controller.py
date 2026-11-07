@@ -47,6 +47,10 @@ class GameAPIController:
         # 优先级 20：目标交战与攻击
         "command_attack": 20,
         "attack": 20,
+        "command_attack_ground": 20,
+        "attack_ground": 20,
+        "force_attack_ground": 20,
+        "bombard": 20,
         # 优先级 25：动态战术干预、属性修改、全局资源调整与创建单位
         "edit_attr": 25,
         "modify_attr": 25,
@@ -433,6 +437,15 @@ class GameAPIController:
                 except ValueError:
                     payload["target_id"] = pos_args[1]
                     payload["god_mode"] = cls._to_bool(pos_args[2])
+        elif action in ("command_attack_ground", "attack_ground", "force_attack_ground", "bombard"):
+            if len(pos_args) == 2:
+                payload.setdefault("unit_ids", "*")
+                payload["x"] = cls._to_number(pos_args[0])
+                payload["y"] = cls._to_number(pos_args[1])
+            elif len(pos_args) >= 3:
+                payload["unit_ids"] = pos_args[0]
+                payload["x"] = cls._to_number(pos_args[1])
+                payload["y"] = cls._to_number(pos_args[2])
         elif action in ("command_fire", "fire"):
             if len(pos_args) == 0:
                 payload.setdefault("unit_ids", "*")
@@ -736,6 +749,8 @@ class GameAPIController:
             return self.command_move(params)
         elif action in ("command_attack", "attack"):
             return self.command_attack(params)
+        elif action in ("command_attack_ground", "attack_ground", "force_attack_ground", "bombard"):
+            return self.command_attack_ground(params)
         elif action in ("command_fire", "fire"):
             return self.command_fire(params)
         elif action in ("command_set_tactic", "set_tactic", "tactic"):
@@ -1194,6 +1209,69 @@ class GameAPIController:
         if is_p and executable_tanks:
             res["queued"] = True
             res["message"] = "Attack command issued while paused, will execute immediately upon resume"
+        return res
+
+    def command_attack_ground(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        为具备范围伤害属性 (splash_radius > 0) 的坦克下达强制攻击地块指令 (Force Attack Ground):
+        - 参数：
+          - x, y: 目标像素坐标 (或 col, row 网格瓦片坐标)
+          - unit_ids: 执行攻击的单位 ID（若未指定则默认当前所有存活且具备范围伤害能力的单位）
+        """
+        dispatcher = getattr(self.game_context, "command_dispatcher", None)
+        physics = getattr(self.game_context, "physics_engine", None)
+        game_map = getattr(self.game_context, "game_map", None)
+        if not dispatcher or not physics:
+            return {"status": "error", "error": "Engine or dispatcher not available"}
+
+        tile_size = getattr(game_map, "tile_size", 36) if game_map else 36
+
+        # 确定目标坐标
+        tx = params.get("x")
+        ty = params.get("y")
+        if tx is None or ty is None:
+            col = params.get("col") if params.get("col") is not None else params.get("tile_x")
+            row = params.get("row") if params.get("row") is not None else params.get("tile_y")
+            if col is not None and row is not None:
+                tx = (float(col) + 0.5) * tile_size
+                ty = (float(row) + 0.5) * tile_size
+            else:
+                return {"status": "error", "error": "Target ground coordinate (x, y) or (col, row) is required"}
+        else:
+            tx = float(tx)
+            ty = float(ty)
+
+        tanks = self._get_target_tanks(params.get("unit_ids"))
+        if not tanks:
+            # 默认选用当前所有存活且具备范围伤害的己方战车
+            tanks = [t for t in physics.player_tanks if t.alive and getattr(t, "splash_radius", 0.0) > 0]
+
+        if not tanks:
+            return {"status": "error", "error": "No matching alive units found"}
+
+        executable_tanks = [t for t in tanks if self._can_execute_command(t, params)]
+        # 严格过滤只对具备范围伤害能力 (splash_radius > 0) 的单位生效
+        aoe_tanks = [t for t in executable_tanks if getattr(t, "splash_radius", 0.0) > 0]
+        if not aoe_tanks:
+            return {
+                "status": "error",
+                "error": "No units capable of AoE damage (splash_radius > 0) available for attack_ground"
+            }
+
+        dispatcher.issue_attack_ground(aoe_tanks, tx, ty)
+
+        is_p = bool(getattr(self.game_context, "is_paused", False))
+        res = {
+            "status": "ok",
+            "command": "command_attack_ground",
+            "target_x": round(tx, 1),
+            "target_y": round(ty, 1),
+            "affected_units": [t.id for t in aoe_tanks],
+            "count": len(aoe_tanks)
+        }
+        if is_p:
+            res["queued"] = True
+            res["message"] = "Attack ground command issued while paused, will execute immediately upon resume"
         return res
 
     def command_fire(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -2079,15 +2157,24 @@ class GameAPIController:
         details: List[Dict[str, Any]] = []
 
         for tank in target_tanks:
-            if not hasattr(tank, attr):
+            has_tank_attr = hasattr(tank, attr)
+            has_cfg_attr = hasattr(tank, "_config") and hasattr(tank._config, attr)
+            if not has_tank_attr and not has_cfg_attr:
                 skipped_units.append(tank.id)
                 continue
 
-            existing_val = getattr(tank, attr)
+            existing_val = getattr(tank, attr, None)
+            if existing_val is None and has_cfg_attr:
+                existing_val = getattr(tank._config, attr, None)
             converted_val = self._auto_convert_value(val, existing_val)
 
             try:
                 setattr(tank, attr, converted_val)
+                if hasattr(tank, "_config") and hasattr(tank._config, attr):
+                    try:
+                        setattr(tank._config, attr, converted_val)
+                    except Exception:
+                        pass
 
                 # 联动状态维护
                 if attr == "health":
@@ -2104,6 +2191,8 @@ class GameAPIController:
                     tank.angle = float(converted_val) % 360.0
                 elif attr == "speed":
                     tank.speed = max(0.0, float(converted_val))
+                elif attr == "fire_cooldown":
+                    tank.fire_cooldown_max = int(converted_val)
 
                 updated_units.append(tank.id)
                 details.append({
@@ -2262,47 +2351,51 @@ class GameAPIController:
                 idx += 1
             unit_id = f"{prefix}_{idx}"
 
-        # 5. 可覆盖属性解析
-        size = int(params.get("size", cfg.size))
-        speed = float(params.get("speed", cfg.speed))
-        health = int(params.get("health", cfg.health))
-        color = str(params.get("color", cfg.color))
-        angle = float(params.get("angle", 180.0 if is_enemy else 0.0))
-        ammo = int(params.get("ammo", -1 if is_enemy else 25))
-        vision_size = float(params.get("vision_size", 250.0 if is_enemy else 288.0))
-        visibility = float(params.get("visibility", 1.0))
-        controllable = self._to_bool(params.get("controllable", False if is_enemy else True))
+        # 5. 可覆盖属性解析与构造
         tactic_name = str(params.get("tactic", "patrol")).lower()
         ai_script = params.get("ai_script")
+        tank_kwargs = {
+            "x": x,
+            "y": y,
+            "size": int(params.get("size", cfg.size)),
+            "speed": float(params.get("speed", cfg.speed)),
+            "camp": owner_camp,
+            "color": str(params.get("color", cfg.color)),
+            "health": int(params.get("health", cfg.health)),
+            "tank_id": unit_id,
+            "vision_size": float(params.get("vision_size", 250.0 if is_enemy else 288.0)),
+            "ammo": int(params.get("ammo", -1 if is_enemy else 25)),
+            "visibility": float(params.get("visibility", 1.0)),
+            "is_tower": self._to_bool(params.get("is_tower", cfg.is_tower)),
+            "can_attack": self._to_bool(params.get("can_attack", cfg.can_attack)),
+            "tower_type": str(params.get("tower_type", cfg.tower_type)),
+            "resupply_radius": float(params.get("resupply_radius", cfg.resupply_radius)),
+            "resupply_interval": int(params.get("resupply_interval", cfg.resupply_interval)),
+            "unit_type": str(params.get("unit_type", cfg.name)),
+            "controllable": self._to_bool(params.get("controllable", False if is_enemy else True)),
+            "ai_script": params.get("ai_script"),
+            "angle": float(params.get("angle", 180.0 if is_enemy else 0.0)),
+            "can_crush_bricks": self._to_bool(params.get("can_crush_bricks", getattr(cfg, "can_crush_bricks", False))),
+            "crush_speed_factor": float(params.get("crush_speed_factor", getattr(cfg, "crush_speed_factor", 0.5))),
+            "converter_table": list(params.get("converter_table", getattr(cfg, "converter_table", []))),
+            "harvest_speed": params.get("harvest_speed", getattr(cfg, "harvest_speed", None)),
+            "accuracy": float(params.get("accuracy", getattr(cfg, "accuracy", 1.0))),
+            "dodge": float(params.get("dodge", getattr(cfg, "dodge", 0.0))),
+            "splash_radius": float(params.get("splash_radius", getattr(cfg, "splash_radius", 0.0))),
+            "friendly_fire": int(params.get("friendly_fire", getattr(cfg, "friendly_fire", 0))),
+            "bullet_speed": float(params.get("bullet_speed", getattr(cfg, "bullet_speed", 6.0))),
+            "bullet_size": int(params.get("bullet_size", getattr(cfg, "bullet_size", 12))),
+            "bullet_color": str(params.get("bullet_color", getattr(cfg, "bullet_color", "#FFFFFF"))),
+        }
+        # 允许 params 覆盖任意更多自定义属性
+        excluded_keys = {"action", "status", "camp", "config_file", "config", "type", "col", "row", "tile_x", "tile_y", "_pos_args", "tactic"}
+        for k, v in params.items():
+            if k not in tank_kwargs and k not in excluded_keys:
+                tank_kwargs[k] = v
 
         # 6. 实例化 Tank
-        new_tank = Tank(
-            x=x,
-            y=y,
-            size=size,
-            speed=speed,
-            camp=owner_camp,
-            color=color,
-            health=health,
-            tank_id=unit_id,
-            vision_size=vision_size,
-            ammo=ammo,
-            visibility=visibility,
-            is_tower=cfg.is_tower,
-            can_attack=cfg.can_attack,
-            tower_type=cfg.tower_type,
-            resupply_radius=cfg.resupply_radius,
-            resupply_interval=cfg.resupply_interval,
-            unit_type=cfg.name,
-            controllable=controllable,
-            ai_script=ai_script,
-            angle=angle,
-            can_crush_bricks=getattr(cfg, "can_crush_bricks", False),
-            crush_speed_factor=getattr(cfg, "crush_speed_factor", 0.5),
-            converter_table=getattr(cfg, "converter_table", []),
-            harvest_speed=getattr(cfg, "harvest_speed", None)
-        )
-        new_tank.fire_cooldown_max = cfg.fire_cooldown
+        new_tank = Tank(**tank_kwargs)
+        new_tank.fire_cooldown_max = int(params.get("fire_cooldown", cfg.fire_cooldown))
         new_tank._config = cfg
 
         # 7. 注册到物理引擎、调度器与 AI 控制器

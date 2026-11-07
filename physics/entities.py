@@ -80,7 +80,10 @@ class Rect:
 
 class Bullet:
     def __init__(self, x: float, y: float, direction: Any, speed: float, size: int,
-                 camp: Camp = Camp.PLAYER, color: str = "#FFFFFF", angle: Optional[float] = None):
+                 camp: Camp = Camp.PLAYER, color: str = "#FFFFFF", angle: Optional[float] = None,
+                 accuracy: float = 1.0, splash_radius: float = 0.0, friendly_fire: int = 0,
+                 damage: int = 1, shooter: Optional[Any] = None,
+                 target_pos: Optional[Tuple[float, float]] = None):
         self.x = x
         self.y = y
         self.speed = speed
@@ -88,6 +91,20 @@ class Bullet:
         self.camp = camp
         self.color = color
         self.alive = True
+        self.accuracy = float(accuracy)
+        self.splash_radius = float(splash_radius)
+        self.friendly_fire = int(friendly_fire)
+        self.damage = int(damage)
+        self.shooter = shooter
+        self.exploded_at_target = False
+
+        self.target_pos = (float(target_pos[0]), float(target_pos[1])) if target_pos is not None else None
+        if self.target_pos is not None:
+            self.target_dist = math.hypot(self.target_pos[0] - (self.x + self.size / 2.0),
+                                          self.target_pos[1] - (self.y + self.size / 2.0))
+        else:
+            self.target_dist = 0.0
+        self.travelled_dist = 0.0
 
         if angle is not None:
             self._angle = float(angle) % 360.0
@@ -136,6 +153,10 @@ class Bullet:
             return
         self.x += self.vx
         self.y += self.vy
+        self.travelled_dist += self.speed
+        if self.target_pos is not None and self.travelled_dist >= self.target_dist:
+            self.alive = False
+            self.exploded_at_target = True
 
 
 @dataclass
@@ -164,7 +185,17 @@ class Tank:
                  can_crush_bricks: bool = False,
                  crush_speed_factor: float = 0.5,
                  converter_table: Optional[List[str]] = None,
-                 harvest_speed: Optional[Dict[str, float]] = None):
+                 harvest_speed: Optional[Dict[str, float]] = None,
+                 accuracy: float = 1.0,
+                 dodge: float = 0.0,
+                 splash_radius: float = 0.0,
+                 friendly_fire: int = 0,
+                 bullet_speed: float = 6.0,
+                 bullet_size: int = 12,
+                 bullet_color: str = "#FFFFFF",
+                 damage: int = 1,
+                 attack_range: float = 240.0,
+                 **kwargs):
         self.id = tank_id
         self.unit_type = unit_type
         self.x = x
@@ -182,6 +213,21 @@ class Tank:
         self.health = health
         self.max_health = health
         self.alive = True
+
+        # ===== 命中精度、闪避、范围伤害与友军误伤 =====
+        self.accuracy = float(accuracy)
+        self.dodge = float(dodge)
+        self.splash_radius = float(splash_radius)
+        self.friendly_fire = int(friendly_fire)
+        self.bullet_speed = float(bullet_speed)
+        self.bullet_size = int(bullet_size)
+        self.bullet_color = str(bullet_color)
+        self.damage = int(damage)
+        self.attack_range = float(attack_range)
+
+        # 接收并挂载任意扩展属性覆盖
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
         # ===== 玩家控制与 AI 脚本机制 =====
         self.controllable = controllable

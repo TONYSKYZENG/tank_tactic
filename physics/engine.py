@@ -358,39 +358,125 @@ class PhysicsEngine:
         tank.y = curr_y
         return False
 
-    def spawn_bullet(self, tank: Tank, bullet_speed: float, bullet_size: int,
-                     color: str = "#FFFFFF", angle: Optional[float] = None) -> Optional[Bullet]:
-        """发射炮弹（支持 360° 任意角度瞄准发射，含有限弹药消耗与判定）"""
+    def spawn_bullet(self, tank: Tank, bullet_speed: Optional[float] = None, bullet_size: Optional[int] = None,
+                     color: Optional[str] = None, angle: Optional[float] = None,
+                     target_pos: Optional[Tuple[float, float]] = None) -> Optional[Bullet]:
+        """发射炮弹（支持 360° 任意角度瞄准发射，支持指定地块目标、命中精度、闪避与范围伤害结算）"""
         if not tank.can_fire(self.limited_ammo_enabled):
             return None
 
         # 消耗一发弹药
         tank.consume_ammo(self.limited_ammo_enabled)
 
-        shoot_angle = tank.angle if angle is None else (float(angle) % 360.0)
-        rad = math.radians(shoot_angle)
+        b_speed = float(getattr(tank, "bullet_speed", 6.0) if bullet_speed is None else bullet_speed)
+        b_size = int(getattr(tank, "bullet_size", 12) if bullet_size is None else bullet_size)
+        b_color = str(getattr(tank, "bullet_color", "#FFFFFF") if color is None else color)
+        accuracy = float(getattr(tank, "accuracy", 1.0))
+        splash_radius = float(getattr(tank, "splash_radius", 0.0))
+        friendly_fire = int(getattr(tank, "friendly_fire", 0))
+        damage = int(getattr(tank, "damage", 1))
 
         center_x = tank.x + tank.size / 2.0
         center_y = tank.y + tank.size / 2.0
 
+        if target_pos is not None:
+            tdx = float(target_pos[0]) - center_x
+            tdy = float(target_pos[1]) - center_y
+            shoot_angle = (math.degrees(math.atan2(tdx, -tdy))) % 360.0
+            tank.angle = shoot_angle
+        else:
+            shoot_angle = tank.angle if angle is None else (float(angle) % 360.0)
+
+        rad = math.radians(shoot_angle)
+
         # 沿炮管朝向将炮弹生成在坦克包围盒外边缘
-        offset = tank.size / 2.0 + bullet_size / 2.0 + 2.0
-        bx = center_x + math.sin(rad) * offset - bullet_size / 2.0
-        by = center_y - math.cos(rad) * offset - bullet_size / 2.0
+        offset = tank.size / 2.0 + b_size / 2.0 + 2.0
+        bx = center_x + math.sin(rad) * offset - b_size / 2.0
+        by = center_y - math.cos(rad) * offset - b_size / 2.0
 
         bullet = Bullet(
             x=bx,
             y=by,
             direction=tank.direction,
-            speed=bullet_speed,
-            size=bullet_size,
+            speed=b_speed,
+            size=b_size,
             camp=tank.camp,
-            color=color,
-            angle=shoot_angle
+            color=b_color,
+            angle=shoot_angle,
+            accuracy=accuracy,
+            splash_radius=splash_radius,
+            friendly_fire=friendly_fire,
+            damage=damage,
+            shooter=tank,
+            target_pos=target_pos
         )
         self.bullets.append(bullet)
         tank.trigger_cooldown()
         return bullet
+
+    def explode_bullet(self, bullet: Bullet, ex: float, ey: float) -> None:
+        """范围伤害爆炸结算：对半径内的瓦片和单位造成 AoE 破坏，遵循命中精度/闪避判定与友军误伤设置"""
+        bullet.alive = False
+        radius = getattr(bullet, "splash_radius", 0.0)
+        if radius <= 0:
+            return
+
+        tile_size = self.game_map.tile_size
+        accuracy = getattr(bullet, "accuracy", 1.0)
+        friendly_fire = int(getattr(bullet, "friendly_fire", 0))
+        damage = getattr(bullet, "damage", 1)
+
+        # 1. 范围内的瓦片摧毁（BRICK, BASE）
+        min_col = max(0, int((ex - radius) // tile_size))
+        max_col = min(self.game_map.cols - 1, int((ex + radius) // tile_size))
+        min_row = max(0, int((ey - radius) // tile_size))
+        max_row = min(self.game_map.rows - 1, int((ey + radius) // tile_size))
+
+        for r in range(min_row, max_row + 1):
+            for c in range(min_col, max_col + 1):
+                tile = self.game_map.get_tile(c, r)
+                if tile in (TileType.BRICK, TileType.BASE):
+                    tc_x = (c + 0.5) * tile_size
+                    tc_y = (r + 0.5) * tile_size
+                    if math.hypot(tc_x - ex, tc_y - ey) <= radius + tile_size * 0.35:
+                        self.game_map.destroy_tile(c, r)
+
+        # 2. 范围内的单位伤害结算
+        all_tanks = self.get_all_active_tanks()
+        sight_rects = self.get_player_sight_rects()
+        has_full_vision = any(p.vision_size < 0 for p in self.player_tanks if p.alive)
+
+        for tank in all_tanks:
+            if not tank.alive:
+                continue
+
+            # 射击者自身免疫自己的范围伤害 (具备范围伤害和友军误伤的单位不会误伤到自己)
+            is_shooter = (tank is bullet.shooter) or (isinstance(bullet.shooter, str) and tank.id == bullet.shooter) or (
+                bullet.shooter is not None and tank.id != "tank" and tank.id == getattr(bullet.shooter, "id", None)
+            )
+            if is_shooter:
+                continue
+
+            # 友军误伤校验：如果 friendly_fire == 0，跳过同阵营单位
+            if friendly_fire == 0 and tank.camp == bullet.camp:
+                continue
+
+            # 距离判定：中心距离 <= radius + tank.size/2
+            tcx = tank.x + tank.size / 2.0
+            tcy = tank.y + tank.size / 2.0
+            dist = math.hypot(tcx - ex, tcy - ey)
+            if dist <= radius + tank.size / 2.0:
+                # 按照攻击者瞄准精度 p 与 被攻击者闪避 q 计算命中率: P = p * (1 - q)
+                p = max(0.0, min(1.0, accuracy))
+                q = max(0.0, min(1.0, getattr(tank, "dodge", 0.0)))
+                hit_prob = max(0.0, min(1.0, p * (1.0 - q)))
+
+                if random.random() < hit_prob:
+                    killed = tank.take_damage(damage)
+                    if killed and tank.camp == Camp.ENEMY:
+                        was_seen = (not self.fog_of_war_enabled) or has_full_vision or tank.is_spotted or any(tank.rect.collides_with(sr) for sr in sight_rects)
+                        if was_seen and tank.id in self.enemy_memory:
+                            del self.enemy_memory[tank.id]
 
     def update_bullets(self) -> None:
         tile_size = self.game_map.tile_size
@@ -406,6 +492,15 @@ class PhysicsEngine:
                 bullet.y > self.game_map.pixel_height):
                 bullet.alive = False
 
+        # 检查是否到达强制攻击地块的目标坐标
+        for bullet in self.bullets:
+            if getattr(bullet, "exploded_at_target", False):
+                bullet.exploded_at_target = False
+                bullet.alive = False
+                ex = bullet.target_pos[0] if bullet.target_pos else (bullet.x + bullet.size / 2.0)
+                ey = bullet.target_pos[1] if bullet.target_pos else (bullet.y + bullet.size / 2.0)
+                self.explode_bullet(bullet, ex, ey)
+
         # 炮弹互相对撞抵消
         active_bullets = [b for b in self.bullets if b.alive]
         for i in range(len(active_bullets)):
@@ -416,6 +511,10 @@ class PhysicsEngine:
                     if b1.rect.collides_with(b2.rect):
                         b1.alive = False
                         b2.alive = False
+                        if getattr(b1, "splash_radius", 0.0) > 0:
+                            self.explode_bullet(b1, b1.x + b1.size / 2.0, b1.y + b1.size / 2.0)
+                        if getattr(b2, "splash_radius", 0.0) > 0:
+                            self.explode_bullet(b2, b2.x + b2.size / 2.0, b2.y + b2.size / 2.0)
 
         # 瓦片碰撞
         for bullet in self.bullets:
@@ -429,6 +528,8 @@ class PhysicsEngine:
             row_end = min(self.game_map.rows - 1, int((bullet.y + bullet.size - 0.01) // tile_size))
 
             hit_obstacle = False
+            hit_col, hit_row = -1, -1
+            hit_tile = None
             for row in range(row_start, row_end + 1):
                 for col in range(col_start, col_end + 1):
                     tile = self.game_map.get_tile(col, row)
@@ -436,14 +537,19 @@ class PhysicsEngine:
                         tile_rect = Rect(col * tile_size, row * tile_size, tile_size, tile_size)
                         if bullet_rect.collides_with(tile_rect):
                             hit_obstacle = True
-                            if tile in (TileType.BRICK, TileType.BASE):
-                                self.game_map.destroy_tile(col, row)
+                            hit_col, hit_row = col, row
+                            hit_tile = tile
                             break
                 if hit_obstacle:
                     break
 
             if hit_obstacle:
                 bullet.alive = False
+                if getattr(bullet, "splash_radius", 0.0) > 0:
+                    self.explode_bullet(bullet, bullet.x + bullet.size / 2.0, bullet.y + bullet.size / 2.0)
+                else:
+                    if hit_tile in (TileType.BRICK, TileType.BASE):
+                        self.game_map.destroy_tile(hit_col, hit_row)
 
         # 坦克碰撞
         all_tanks = self.get_all_active_tanks()
@@ -455,17 +561,35 @@ class PhysicsEngine:
                 continue
 
             for tank in all_tanks:
-                if tank.alive and tank.camp != bullet.camp:
-                    if bullet.rect.collides_with(tank.rect):
-                        killed = tank.take_damage(1)
-                        bullet.alive = False
+                if not tank.alive:
+                    continue
 
-                        # 只有在我方单位看见了敌方单位被杀死的情况下，才能删除字典项目
-                        if killed and tank.camp == Camp.ENEMY:
-                            was_seen = (not self.fog_of_war_enabled) or has_full_vision or tank.is_spotted or any(tank.rect.collides_with(sr) for sr in sight_rects)
-                            if was_seen and tank.id in self.enemy_memory:
-                                del self.enemy_memory[tank.id]
-                        break
+                # 射击者自身免疫自身炮弹碰撞与伤害
+                is_shooter = (tank is bullet.shooter) or (isinstance(bullet.shooter, str) and tank.id == bullet.shooter) or (
+                    bullet.shooter is not None and tank.id != "tank" and tank.id == getattr(bullet.shooter, "id", None)
+                )
+                if is_shooter:
+                    continue
+
+                is_enemy = (tank.camp != bullet.camp)
+                can_collide = is_enemy or (getattr(bullet, "friendly_fire", 0) == 1)
+
+                if can_collide and bullet.rect.collides_with(tank.rect):
+                    bullet.alive = False
+                    if getattr(bullet, "splash_radius", 0.0) > 0:
+                        self.explode_bullet(bullet, bullet.x + bullet.size / 2.0, bullet.y + bullet.size / 2.0)
+                    else:
+                        p = max(0.0, min(1.0, getattr(bullet, "accuracy", 1.0)))
+                        q = max(0.0, min(1.0, getattr(tank, "dodge", 0.0)))
+                        hit_prob = max(0.0, min(1.0, p * (1.0 - q)))
+
+                        if random.random() < hit_prob:
+                            killed = tank.take_damage(getattr(bullet, "damage", 1))
+                            if killed and tank.camp == Camp.ENEMY:
+                                was_seen = (not self.fog_of_war_enabled) or has_full_vision or tank.is_spotted or any(tank.rect.collides_with(sr) for sr in sight_rects)
+                                if was_seen and tank.id in self.enemy_memory:
+                                    del self.enemy_memory[tank.id]
+                    break
 
         self.bullets = [b for b in self.bullets if b.alive]
         self.player_tanks = [t for t in self.player_tanks if t.alive]

@@ -1,5 +1,5 @@
 from .tactics_mode import TacticMode
-from .commands import BaseCommand, MoveCommand, AttackTargetCommand, HoldCommand, GuardUnitCommand, HarvestCommand
+from .commands import BaseCommand, MoveCommand, AttackTargetCommand, HoldCommand, GuardUnitCommand, HarvestCommand, AttackGroundCommand
 from .dispatcher import CommandDispatcher
 
 __all__ = [
@@ -10,5 +10,6 @@ __all__ = [
     "HoldCommand",
     "GuardUnitCommand",
     "HarvestCommand",
+    "AttackGroundCommand",
     "CommandDispatcher"
 ]
